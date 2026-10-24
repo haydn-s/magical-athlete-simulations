@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Badge, CopyButton, LoadError, Loading, Notice } from "../components/ui";
-import { cancelJob } from "../lib/api";
+import { cancelJob, clearFinishedJobs } from "../lib/api";
 import { isActive, refreshJobs, useJobs } from "../lib/jobs";
 import { href } from "../lib/router";
 import { compact, int } from "../lib/stats";
@@ -12,13 +12,26 @@ const STATE_LABEL: Record<Job["state"], string> = {
   done: "Done",
   failed: "Failed",
   cancelled: "Cancelled",
+  interrupted: "Interrupted",
 };
 
 export function JobsPage() {
   const { jobs, error } = useJobs();
+  const [clearing, setClearing] = useState(false);
 
   if (!jobs && error) return <LoadError message={error} />;
   if (!jobs) return <Loading what="jobs" />;
+  const finished = jobs.filter((job) => !isActive(job)).length;
+
+  const clear = async () => {
+    setClearing(true);
+    try {
+      await clearFinishedJobs();
+      refreshJobs();
+    } finally {
+      setClearing(false);
+    }
+  };
 
   return (
     <>
@@ -28,12 +41,18 @@ export function JobsPage() {
         </div>
         <p className="subtitle">
           Runs you start from the viewer. They run one at a time on this machine, using every core, and save to{" "}
-          <code>results/</code> like any other run. This list clears when the server restarts; the results don’t.
+          <code>results/</code> like any other run. This list is kept in <code>results/.jobs.json</code>, so it
+          survives restarting the server.
         </p>
         <div className="head-actions">
           <a className="button primary small" href={href.newRun()}>
             New run
           </a>
+          {finished > 0 && (
+            <button type="button" className="button small" onClick={clear} disabled={clearing}>
+              Clear finished ({finished})
+            </button>
+          )}
         </div>
       </div>
 
@@ -116,7 +135,7 @@ function JobCard({ job }: { job: Job }) {
         </div>
       </div>
 
-      {job.state !== "failed" && job.state !== "cancelled" && (
+      {job.state !== "failed" && job.state !== "cancelled" && job.state !== "interrupted" && (
         <div className="progress">
           <div
             className="meter"
@@ -142,6 +161,11 @@ function JobCard({ job }: { job: Job }) {
         <p className="card-note">
           Stopped after {int(job.done)} of {int(job.total)} games. Nothing was saved.
         </p>
+      )}
+      {job.state === "interrupted" && (
+        <Notice tone="warning">
+          <strong>Interrupted</strong> after about {int(job.done)} of {int(job.total)} games. {job.error}
+        </Notice>
       )}
       {job.state === "failed" && (
         <Notice tone="critical">

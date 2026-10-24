@@ -66,6 +66,21 @@ class DeterminismTest(unittest.TestCase):
         ]
         self.assertEqual(json.loads(outputs[0]), json.loads(outputs[1]))
 
+    def test_powers_only_use_the_games_own_rng(self):
+        # Any call to the module-level random during a race fails the test; game.rng
+        # and the lineup's Random instances are separate objects and still work.
+        import random
+        from unittest import mock
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("a power used the module-level random instead of game.rng")
+
+        config = make_config(games=400, focus=["Duelist", "FlipFlop", "Genius"])
+        names = ["random", "randint", "randrange", "choice", "choices", "shuffle", "sample", "uniform"]
+        with mock.patch.multiple(random, **{name: forbidden for name in names}):
+            summary = batch_summary(config)
+        self.assertEqual(summary["totals"]["errors"], 0)
+
     def test_replay_matches_batch_record(self):
         config = make_config(games=50)
         for index in (0, 17, 49):

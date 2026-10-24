@@ -136,8 +136,10 @@ describe("router", () => {
     expect(parseRoute(href.racer("x", "M.O.U.T.H."))).toEqual({ page: "racer", runId: "x", racer: "M.O.U.T.H." });
     expect(parseRoute(href.compare("a b", "c"))).toEqual({ page: "compare", a: "a b", b: "c" });
     expect(parseRoute(href.compare())).toEqual({ page: "compare", a: null, b: null });
-    expect(parseRoute(href.newRun())).toEqual({ page: "new", from: null });
-    expect(parseRoute(href.newRun("20261024_a b"))).toEqual({ page: "new", from: "20261024_a b" });
+    expect(parseRoute(href.newRun())).toEqual({ page: "new", from: null, track: null });
+    expect(parseRoute(href.newRun("20261024_a b"))).toEqual({ page: "new", from: "20261024_a b", track: null });
+    expect(parseRoute(href.newRun(null, "sprint"))).toEqual({ page: "new", from: null, track: "sprint" });
+    expect(parseRoute(href.tracks())).toEqual({ page: "tracks" });
     expect(parseRoute(href.jobs())).toEqual({ page: "jobs" });
     expect(parseRoute("#/nope")).toEqual({ page: "not-found" });
     expect(parseRoute("#/run/x/racer")).toEqual({ page: "not-found" });

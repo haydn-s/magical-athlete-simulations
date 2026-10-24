@@ -9,7 +9,6 @@ Created on Mon Jun  8 10:55:01 2026
 
 from Events import *
 from collections import Counter
-import random
 
 from Racers import Racer
 
@@ -239,7 +238,8 @@ class BlimpPower(Power):
             return
 
         original_distance = event.distance
-        if self.owner.position < 15:
+        # Before the halfway point (space 15 on a 30-space track).
+        if self.owner.position < game.track.length / 2:
             event.distance += 3
             self.activate_power(
                 game,
@@ -449,9 +449,11 @@ class CrossingGuardPower(Power):
         if not empty_spaces:
             return
 
-        # Simple AI: put it just before the finish if possible.
-        #self.crosswalk_position = max(empty_spaces)
-        self.crosswalk_position = 27
+        # Simple AI: three spaces before the finish (27 on a 30-space track),
+        # or the nearest unmarked space before that.
+        target = game.track.length - 3
+        before_target = [position for position in empty_spaces if position <= target]
+        self.crosswalk_position = max(before_target) if before_target else min(empty_spaces)
 
         game.log.append(f"{self.owner.name} marks space {self.crosswalk_position} as the Crosswalk.")
 
@@ -683,7 +685,7 @@ class DuelistPower(Power):
             return
 
         game.duels_this_chain += 1
-        opponent = random.choice(opponents)
+        opponent = game.rng.choice(opponents)
         self.duel(game, event, opponent)
 
     def duel(self, game, source_event, opponent):
@@ -811,7 +813,7 @@ class FlipFlopPower(Power):
             return None
 
         # *** Could check to see if anyone is on a point space
-        return random.choice(candidates)
+        return game.rng.choice(candidates)
 
 class GamblerPower(Power):
     MAX_SAVED = 5
@@ -990,7 +992,7 @@ class GeniusPower(Power):
         if event.racer is not self.owner:
             return
 
-        self.prediction = random.randint(1, 6)
+        self.prediction = game.rng.randint(1, 6)
 
         game.log.append(
             f"{self.owner.name} predicts they will roll {self.prediction}."
@@ -1091,7 +1093,9 @@ class HighFivePower(Power):
         if event.racer is not self.owner:
             return
 
-        if self.owner.position not in [5, 10, 15, 20, 25]:
+        # Every multiple of 5 before the finish (5-25 on a 30-space track).
+        position = self.owner.position
+        if position <= 0 or position % 5 != 0 or position >= game.track.length:
             return
 
         self.activate_power(
@@ -1384,7 +1388,7 @@ class MadBomberPower(Power):
         #    return
 
         #chosen_spaces = sorted(empty_spaces, reverse=True)[:self.NUM_BOMBS]
-        chosen_spaces = [8, 20, 29]
+        chosen_spaces = self.starting_bomb_spaces(game)
 
         for position in chosen_spaces:
             game.bombs[position] = self.owner
@@ -1392,6 +1396,18 @@ class MadBomberPower(Power):
         game.log.append(
             f"{self.owner.name} places bombs on spaces {chosen_spaces}."
         )
+
+    def starting_bomb_spaces(self, game):
+        # The same spots on any track: 8, 20 and 29 on a 30-space track, scaled to
+        # the track's length, each moved to the nearest free unmarked space.
+        length = game.track.length
+        targets = [round(length * 8 / 30), round(length * 20 / 30), length - 1]
+        chosen = []
+        for target in targets:
+            free = [position for position in range(1, length) if position not in chosen]
+            unmarked = [position for position in free if not game.inspect_space(position).is_marked]
+            chosen.append(min(unmarked or free, key=lambda position: (abs(position - target), -position)))
+        return chosen
 
     def before_main(self, game, event):
         if self.inactive():

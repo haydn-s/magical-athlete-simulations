@@ -28,7 +28,8 @@ def _names(values):
 
 
 def add_config_args(parser):
-    parser.add_argument("--track", default="wild", help=f"track key: {', '.join(tracks.TRACKS)} (default: wild)")
+    parser.add_argument("--track", default="wild",
+                        help="track key from tracks/ (see `python -m sim list`) or a path to a track file (default: wild)")
     parser.add_argument("--players", type=int, default=7, help="racers per game (default: 7)")
     parser.add_argument("--places", type=int, default=2, help="finishers before the race ends (default: 2)")
     parser.add_argument("--seed", type=int, help="master seed (default: random, recorded in the results)")
@@ -263,9 +264,12 @@ def cmd_list(args):
             variant = f"  (variant of {entry.variant_of})" if entry.variant_of else ""
             print(f"  {entry.identifier:3d}  {entry.name}{variant}")
 
-    print("\nTracks:")
-    for key, track in tracks.TRACKS.items():
-        print(f"  {key:6s} {track.name} ({track.length} spaces, {len(track.spaces)} marked)")
+    found, errors = tracks.scan()
+    print("\nTracks (tracks/*.json):")
+    for key, track in found.items():
+        print(f"  {key:12s} {track.name} ({track.length} spaces, {len(track.spaces)} marked)")
+    for key, message in errors.items():
+        print(f"  {key:12s} NOT RACEABLE: {message}")
 
 
 # --- serve -------------------------------------------------------------------

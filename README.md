@@ -11,7 +11,6 @@ against the standard racers.
 | `Racers.py` | Racer classes (one per power) |
 | `sim/` | Batch simulator: parallel, reproducible runs with saved results |
 | `web/` | Results viewer: a React app for browsing and comparing saved runs |
-| `MultiSim.py` | The original single-process batch script (still works) |
 
 The simulator needs Python 3.10+ and the standard library only. The results viewer
 also needs Node.js 22.12 or newer.
@@ -31,7 +30,7 @@ If you leave out `--seed`, a random one is picked and recorded.
 | Option | Default | |
 | --- | --- | --- |
 | `-n, --games` | 10000 | games to simulate |
-| `--track` | `wild` | `wild` or `mild` (see `sim/tracks.py`) |
+| `--track` | `wild` | a track key from `tracks/`, or a path to a track file |
 | `--players` | 7 | racers per game |
 | `--places` | 2 | finishers before the race ends (5 and 3 point chips) |
 | `--focus NAME` | | seat this racer in every game (repeatable) |
@@ -178,8 +177,7 @@ back when a Scoocher is near the finish). `ScoocherPowerWeakened` doesn't subcla
 ### Reading the table
 
 - **Pts/G**: average point chips per game (5 for first, 3 for second, plus track
-  and power chips), with its 95% margin. This is the main ranking, as in
-  `MultiSim.py`.
+  and power chips), with its 95% margin. This is the main ranking.
 - **Win%**: share of games the racer finished first, with a 95% Wilson interval.
   If two racers' intervals overlap, run more games before ranking them.
 - **TopN%**: finished in a scoring place.
@@ -190,30 +188,60 @@ back when a Scoocher is near the finish). `ScoocherPowerWeakened` doesn't subcla
   means the racer drags games out.
 - **Win% by seat**: turn-order advantage across all games.
 
-## How this differs from `MultiSim.py`
+## Comparing with numbers from the old `MultiSim.py`
 
-- **Reproducible.** Duelist, Flip Flop and Genius use Python's global `random`
-  rather than the game's seeded RNG, so `seed=538` never fully pinned down
-  MultiSim's results. The new runner seeds that RNG for every game. No power
-  code was changed.
-- **Eliminated racers count.** MultiSim skipped a racer's game entirely when it
-  was eliminated, which slightly inflated win rates for racers that are often
-  eliminated. The new runner counts those games at the racer's actual placing
-  and points.
-- **`avg` was track progress, not placing.** MultiSim's `avg` column is
-  `min(position, 30)`. It's kept as `avg_progress` in `racers.csv`, and AvgPl is
-  the true placing.
-- **A crashing game doesn't stop the batch.** It's logged to `errors.jsonl` and
-  left out of the stats.
-- **Faster.** The engine runs about 800 games/s per core. 50,000 games took
-  about 60s in MultiSim and about 5s on 18 cores.
+`MultiSim.py` has been retired; `python -m sim run` replaces it. If you have
+numbers from it, they differ from today's for these reasons:
 
-## Known track assumptions
+- **Eliminated racers now count.** MultiSim skipped a racer's game entirely when
+  it was eliminated, which slightly inflated win rates for racers that are often
+  eliminated.
+- **Its `avg` column was track progress, not placing** (`min(position, 30)`).
+  That's `avg_progress` in `racers.csv`; AvgPl is the true placing.
+- **Its seeds weren't reproducible.** Duelist, Flip Flop and Genius drew from
+  Python's global `random`. They now use the game's own seeded dice, so a seed
+  fully determines every game.
 
-Some powers hard-code positions for a 30-space track: Crossing Guard's crosswalk
-(27), Mad Bomber's bombs (8, 20, 29), High Five (multiples of 5) and Blimp's
-halfway point (15). New tracks of other lengths will run, but those racers won't
-play as designed.
+## Designing your own tracks
+
+Tracks are JSON files in `tracks/`. The file name is the track's key, so
+`tracks/sprint.json` is raced with `--track sprint`, and it also appears in the
+viewer's New run form and on its **Tracks** page:
+
+```json
+{
+  "name": "Sprint",
+  "length": 40,
+  "spaces": {
+    "3": { "points": 1 },
+    "9": { "trip": true },
+    "14": { "move": 4 },
+    "22": { "move": -3 },
+    "31": { "trip": true, "points": 1 }
+  }
+}
+```
+
+- Spaces run from 1 to `length − 1`. Start is 0 and the finish line is `length`.
+- A space can give a point chip (`points`), trip (`trip`), or be an arrow
+  (`move`, negative to go back). It can combine these.
+- Lengths from 10 to 200 work. Arrows can't point off the track.
+- Mistakes get a plain explanation, in `python -m sim list` and on the Tracks
+  page. Files are re-read when they change, so edit and reload.
+- `--track path/to/file.json` races a track file that lives anywhere.
+- Every run saves its track's layout, so a run still replays correctly after
+  the file changes or is deleted.
+
+Racers that care about the board use positions relative to the track. On the
+30-space tracks they behave exactly as before (52,000 reference games came out
+identical):
+
+| Racer | On a 30-space track | On any track |
+| --- | --- | --- |
+| Crossing Guard | crosswalk on 27 | 3 before the finish, or the nearest unmarked space before that |
+| Mad Bomber | bombs on 8, 20, 29 | the same fractions of the track, moved off marked spaces |
+| High Five | spaces 5–25 | every multiple of 5 before the finish |
+| Blimp | +3 below space 15 | +3 below the halfway point |
 
 ## Tests
 
@@ -244,3 +272,41 @@ The viewer's own tests run with `npm test` in `web/`.
 | Python 3.10 / 3.12 / 3.14 | the unit tests, plus a CLI smoke run of `run`, `replay` and `compare` |
 | Web app | `npm ci`, typecheck, unit tests and production build. The built viewer is uploaded as the `results-viewer` artifact (kept 14 days). |
 | End-to-end | the real `python -m sim serve` with that build: load the app, start a run through the API, read its results back |
+
+### Branch protection
+
+`main` only accepts changes through pull requests whose five CI checks pass:
+Python 3.10, 3.12 and 3.14, Web app, and End-to-end. Force-pushes and deleting
+`main` are blocked. Reviews aren't required, so you can merge your own PRs. As
+the repo admin you can still tick GitHub's "bypass" box in an emergency.
+
+The settings live in `.github/branch-protection.json`. If CI's job names
+change, update the file and re-apply it:
+
+```bash
+gh api -X PUT repos/haydn-s/magical-athlete-simulations/branches/main/protection --input .github/branch-protection.json
+```
+
+### Dependency updates
+
+Dependabot (`.github/dependabot.yml`) opens a grouped PR each Monday for web app
+packages and for GitHub Actions versions. CI runs on each one, so a green PR is
+safe to merge. Major version bumps get their own PRs. `@types/node` stays on
+Node 24's major version to match CI. The simulator itself has no dependencies.
+
+### Releases
+
+Push a version tag to publish a release:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+`.github/workflows/release.yml` runs the full CI suite, then creates a GitHub
+Release with notes generated from the merged PRs. It attaches
+`magical-athlete-viewer-<tag>.zip`, the exact viewer build CI tested. To use the
+viewer without installing Node, unzip that file in the repo folder (it creates
+`web/dist/`) and run `python -m sim serve`. Tags with a hyphen, like
+`v1.1.0-rc1`, become pre-releases. Pull requests that change the release
+workflow run all of it except the publish step.

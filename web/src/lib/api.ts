@@ -40,6 +40,10 @@ export function cancelJob(id: string): Promise<Job> {
   return postJson<Job>(`api/jobs/${encodeURIComponent(id)}/cancel`, {});
 }
 
+export function clearFinishedJobs(): Promise<{ cleared: number }> {
+  return postJson<{ cleared: number }>("api/jobs/clear", {});
+}
+
 export function fetchRuns(): Promise<RunListItem[]> {
   return getJson<RunListItem[]>("api/runs");
 }

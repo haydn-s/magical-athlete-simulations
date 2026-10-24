@@ -1,0 +1,79 @@
+# Publishes a GitHub Release when a version tag is pushed:
+#
+#   git tag v1.2.0 && git push origin v1.2.0
+#
+# The full CI suite runs first. The release then attaches the results viewer that
+# CI built and tested (magical-athlete-viewer-<tag>.zip), so it can be used
+# without installing Node: unzip it in the repo folder (it creates web/dist/) and
+# run `python -m sim serve`. Tags with a hyphen (v1.2.0-rc1) become pre-releases.
+#
+# Pull requests that change this file run everything except the publish step.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Checks
+    uses: ./.github/workflows/ci.yml
+
+  package:
+    name: Package and publish
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Use the viewer CI built and tested
+        uses: actions/download-artifact@v8
+        with:
+          name: results-viewer
+          path: web/dist
+
+      - name: Package the viewer
+        id: package
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="dry-run-${GITHUB_SHA::7}"
+          fi
+          archive="magical-athlete-viewer-${version}.zip"
+          zip -qr "$archive" web/dist
+          unzip -l "$archive" | grep -q "web/dist/index.html"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-archive
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: |
+          flags=(--verify-tag --generate-notes --title "$GITHUB_REF_NAME")
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" "$ARCHIVE" "${flags[@]}"

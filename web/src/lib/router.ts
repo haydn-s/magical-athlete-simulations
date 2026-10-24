@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 //   #/compare?a=<id>&b=<id>    two runs side by side
 //   #/new[?from=<id>]          start a run (optionally from another run's settings)
 //   #/jobs                     runs started from the viewer
+//   #/tracks                   every track, previewed on the board
 
 export type Route =
   | { page: "runs" }
@@ -15,8 +16,9 @@ export type Route =
   | { page: "racer"; runId: string; racer: string }
   | { page: "game"; runId: string; game: number }
   | { page: "compare"; a: string | null; b: string | null }
-  | { page: "new"; from: string | null }
+  | { page: "new"; from: string | null; track: string | null }
   | { page: "jobs" }
+  | { page: "tracks" }
   | { page: "not-found" };
 
 export function parseRoute(hash: string): Route {
@@ -28,7 +30,8 @@ export function parseRoute(hash: string): Route {
   if (parts[0] === "compare" && parts.length === 1) {
     return { page: "compare", a: params.get("a"), b: params.get("b") };
   }
-  if (parts[0] === "new" && parts.length === 1) return { page: "new", from: params.get("from") };
+  if (parts[0] === "new" && parts.length === 1) return { page: "new", from: params.get("from"), track: params.get("track") };
+  if (parts[0] === "tracks" && parts.length === 1) return { page: "tracks" };
   if (parts[0] === "jobs" && parts.length === 1) return { page: "jobs" };
   if (parts[0] === "run" && parts.length >= 2) {
     const runId = parts[1];
@@ -58,7 +61,14 @@ export const href = {
     return `#/compare${query ? `?${query}` : ""}`;
   },
   game: (runId: string, game: number) => `#/run/${encodeURIComponent(runId)}/game/${game}`,
-  newRun: (from?: string | null) => (from ? `#/new?from=${encodeURIComponent(from)}` : "#/new"),
+  newRun: (from?: string | null, track?: string | null) => {
+    const params = new URLSearchParams();
+    if (from) params.set("from", from);
+    if (track) params.set("track", track);
+    const query = params.toString();
+    return `#/new${query ? `?${query}` : ""}`;
+  },
+  tracks: () => "#/tracks",
   jobs: () => "#/jobs",
 };
 

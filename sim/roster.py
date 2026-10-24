@@ -18,7 +18,7 @@ import Powers
 import Racers
 from Racers import Racer
 
-# Not simulated (from MultiSim.py):
+# Not simulated:
 #   Copycat - difficult; Mastermind - pre-race bet; Programmer - not yet;
 #   Egg, Twin - no in-race capabilities; Hot Potato - changes players, not a racer;
 #   Charlatan - all about player interaction.
@@ -90,11 +90,6 @@ def lookup(name):
 
 def default_pool():
     return [e for e in ROSTER.values() if e.in_default_pool]
-
-
-def make_all_racers():
-    """Fresh instances of every default-pool racer, in roster order."""
-    return [e.make() for e in default_pool()]
 
 
 def build_pool(only=(), include=(), exclude=(), focus=()):

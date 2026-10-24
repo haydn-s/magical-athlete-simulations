@@ -1,0 +1,19 @@
+{
+  "required_status_checks": {
+    "strict": false,
+    "checks": [
+      { "context": "Python 3.10", "app_id": 15368 },
+      { "context": "Python 3.12", "app_id": 15368 },
+      { "context": "Python 3.14", "app_id": 15368 },
+      { "context": "Web app", "app_id": 15368 },
+      { "context": "End-to-end", "app_id": 15368 }
+    ]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "required_linear_history": false,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_conversation_resolution": false
+}

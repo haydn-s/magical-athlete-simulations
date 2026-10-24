@@ -8,6 +8,7 @@ import { RacerPage } from "./pages/RacerPage";
 import { ReplayPage } from "./pages/ReplayPage";
 import { RunPage } from "./pages/RunPage";
 import { RunsPage } from "./pages/RunsPage";
+import { TracksPage } from "./pages/TracksPage";
 
 export function App() {
   const route = useRoute();
@@ -35,6 +36,9 @@ export function App() {
               New run
             </a>
             <JobsLink current={route.page === "jobs"} />
+            <a href={href.tracks()} aria-current={route.page === "tracks" ? "page" : undefined}>
+              Tracks
+            </a>
           </nav>
           <ThemeToggle />
         </div>
@@ -59,7 +63,9 @@ function Page({ route }: { route: Route }) {
     case "compare":
       return <ComparePage a={route.a} b={route.b} />;
     case "new":
-      return <NewRunPage from={route.from} />;
+      return <NewRunPage from={route.from} track={route.track} />;
+    case "tracks":
+      return <TracksPage />;
     case "jobs":
       return <JobsPage />;
     case "not-found":
