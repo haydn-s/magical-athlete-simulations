@@ -9,7 +9,6 @@ Created on Mon Jun  8 10:55:01 2026
 
 from Events import *
 from collections import Counter
-import random
 
 from Racers import Racer
 
@@ -686,7 +685,7 @@ class DuelistPower(Power):
             return
 
         game.duels_this_chain += 1
-        opponent = random.choice(opponents)
+        opponent = game.rng.choice(opponents)
         self.duel(game, event, opponent)
 
     def duel(self, game, source_event, opponent):
@@ -814,7 +813,7 @@ class FlipFlopPower(Power):
             return None
 
         # *** Could check to see if anyone is on a point space
-        return random.choice(candidates)
+        return game.rng.choice(candidates)
 
 class GamblerPower(Power):
     MAX_SAVED = 5
@@ -993,7 +992,7 @@ class GeniusPower(Power):
         if event.racer is not self.owner:
             return
 
-        self.prediction = random.randint(1, 6)
+        self.prediction = game.rng.randint(1, 6)
 
         game.log.append(
             f"{self.owner.name} predicts they will roll {self.prediction}."

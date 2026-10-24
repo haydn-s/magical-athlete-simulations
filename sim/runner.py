@@ -52,8 +52,9 @@ def lineup_for(config, index):
 def setup_game(config, index):
     lineup, game_seed, aux_seed = lineup_for(config, index)
 
-    # Duelist, Flip Flop and Genius draw from the module-level `random` rather than
-    # game.rng, so seed it per game too (with its own seed, so it never mirrors the dice).
+    # Powers should draw from game.rng. Seed the module-level `random` per game too
+    # (with its own seed, so it never mirrors the dice), so a new design that uses
+    # it by mistake still gives reproducible results.
     random.seed(aux_seed)
 
     return Game(

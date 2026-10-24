@@ -11,7 +11,6 @@ against the standard racers.
 | `Racers.py` | Racer classes (one per power) |
 | `sim/` | Batch simulator: parallel, reproducible runs with saved results |
 | `web/` | Results viewer: a React app for browsing and comparing saved runs |
-| `MultiSim.py` | The original single-process batch script (still works) |
 
 The simulator needs Python 3.10+ and the standard library only. The results viewer
 also needs Node.js 22.12 or newer.
@@ -178,8 +177,7 @@ back when a Scoocher is near the finish). `ScoocherPowerWeakened` doesn't subcla
 ### Reading the table
 
 - **Pts/G**: average point chips per game (5 for first, 3 for second, plus track
-  and power chips), with its 95% margin. This is the main ranking, as in
-  `MultiSim.py`.
+  and power chips), with its 95% margin. This is the main ranking.
 - **Win%**: share of games the racer finished first, with a 95% Wilson interval.
   If two racers' intervals overlap, run more games before ranking them.
 - **TopN%**: finished in a scoring place.
@@ -190,23 +188,19 @@ back when a Scoocher is near the finish). `ScoocherPowerWeakened` doesn't subcla
   means the racer drags games out.
 - **Win% by seat**: turn-order advantage across all games.
 
-## How this differs from `MultiSim.py`
+## Comparing with numbers from the old `MultiSim.py`
 
-- **Reproducible.** Duelist, Flip Flop and Genius use Python's global `random`
-  rather than the game's seeded RNG, so `seed=538` never fully pinned down
-  MultiSim's results. The new runner seeds that RNG for every game. No power
-  code was changed.
-- **Eliminated racers count.** MultiSim skipped a racer's game entirely when it
-  was eliminated, which slightly inflated win rates for racers that are often
-  eliminated. The new runner counts those games at the racer's actual placing
-  and points.
-- **`avg` was track progress, not placing.** MultiSim's `avg` column is
-  `min(position, 30)`. It's kept as `avg_progress` in `racers.csv`, and AvgPl is
-  the true placing.
-- **A crashing game doesn't stop the batch.** It's logged to `errors.jsonl` and
-  left out of the stats.
-- **Faster.** The engine runs about 800 games/s per core. 50,000 games took
-  about 60s in MultiSim and about 5s on 18 cores.
+`MultiSim.py` has been retired; `python -m sim run` replaces it. If you have
+numbers from it, they differ from today's for these reasons:
+
+- **Eliminated racers now count.** MultiSim skipped a racer's game entirely when
+  it was eliminated, which slightly inflated win rates for racers that are often
+  eliminated.
+- **Its `avg` column was track progress, not placing** (`min(position, 30)`).
+  That's `avg_progress` in `racers.csv`; AvgPl is the true placing.
+- **Its seeds weren't reproducible.** Duelist, Flip Flop and Genius drew from
+  Python's global `random`. They now use the game's own seeded dice, so a seed
+  fully determines every game.
 
 ## Designing your own tracks
 
