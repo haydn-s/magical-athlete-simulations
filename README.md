@@ -272,3 +272,41 @@ The viewer's own tests run with `npm test` in `web/`.
 | Python 3.10 / 3.12 / 3.14 | the unit tests, plus a CLI smoke run of `run`, `replay` and `compare` |
 | Web app | `npm ci`, typecheck, unit tests and production build. The built viewer is uploaded as the `results-viewer` artifact (kept 14 days). |
 | End-to-end | the real `python -m sim serve` with that build: load the app, start a run through the API, read its results back |
+
+### Branch protection
+
+`main` only accepts changes through pull requests whose five CI checks pass:
+Python 3.10, 3.12 and 3.14, Web app, and End-to-end. Force-pushes and deleting
+`main` are blocked. Reviews aren't required, so you can merge your own PRs. As
+the repo admin you can still tick GitHub's "bypass" box in an emergency.
+
+The settings live in `.github/branch-protection.json`. If CI's job names
+change, update the file and re-apply it:
+
+```bash
+gh api -X PUT repos/haydn-s/magical-athlete-simulations/branches/main/protection --input .github/branch-protection.json
+```
+
+### Dependency updates
+
+Dependabot (`.github/dependabot.yml`) opens a grouped PR each Monday for web app
+packages and for GitHub Actions versions. CI runs on each one, so a green PR is
+safe to merge. Major version bumps get their own PRs. `@types/node` stays on
+Node 24's major version to match CI. The simulator itself has no dependencies.
+
+### Releases
+
+Push a version tag to publish a release:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+`.github/workflows/release.yml` runs the full CI suite, then creates a GitHub
+Release with notes generated from the merged PRs. It attaches
+`magical-athlete-viewer-<tag>.zip`, the exact viewer build CI tested. To use the
+viewer without installing Node, unzip that file in the repo folder (it creates
+`web/dist/`) and run `python -m sim serve`. Tags with a hyphen, like
+`v1.1.0-rc1`, become pre-releases. Pull requests that change the release
+workflow run all of it except the publish step.

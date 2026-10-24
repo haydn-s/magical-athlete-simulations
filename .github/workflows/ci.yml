@@ -12,12 +12,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_call: # the Release workflow runs these same checks first
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # github.workflow is the caller's name when Release runs these checks, so the
+  # two never share a group (and never cancel each other).
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
