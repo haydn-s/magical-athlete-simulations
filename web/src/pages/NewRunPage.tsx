@@ -18,7 +18,7 @@ import type { RosterInfo, Summary } from "../types";
 
 const GAME_PRESETS = [10_000, 50_000, 100_000, 500_000];
 
-export function NewRunPage({ from }: { from: string | null }) {
+export function NewRunPage({ from, track }: { from: string | null; track?: string | null }) {
   const setup = useLoad(
     async () => {
       const [roster, source] = await Promise.all([fetchRoster(), from ? fetchRun(from) : Promise.resolve(null)]);
@@ -29,13 +29,26 @@ export function NewRunPage({ from }: { from: string | null }) {
 
   if (setup.status === "error") return <LoadError message={setup.error} />;
   if (setup.status !== "ready") return <Loading what="racers" />;
-  return <NewRunForm key={from ?? ""} roster={setup.data.roster} from={from} source={setup.data.source} />;
+  return (
+    <NewRunForm key={`${from ?? ""}/${track ?? ""}`} roster={setup.data.roster} from={from} track={track ?? null} source={setup.data.source} />
+  );
 }
 
-function NewRunForm({ roster, from, source }: { roster: RosterInfo; from: string | null; source: Summary | null }) {
-  const [form, setForm] = useState<RunForm>(() =>
-    from && source ? formFromRun(roster, from, source) : defaultForm(roster),
-  );
+function NewRunForm({
+  roster,
+  from,
+  track,
+  source,
+}: {
+  roster: RosterInfo;
+  from: string | null;
+  track: string | null;
+  source: Summary | null;
+}) {
+  const [form, setForm] = useState<RunForm>(() => {
+    const base = from && source ? formFromRun(roster, from, source) : defaultForm(roster);
+    return track && roster.tracks.some((t) => t.key === track) ? { ...base, track } : base;
+  });
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -87,7 +100,7 @@ function NewRunForm({ roster, from, source }: { roster: RosterInfo; from: string
             <select value={form.track} onChange={(e) => update({ track: e.target.value })}>
               {roster.tracks.map((t) => (
                 <option key={t.key} value={t.key}>
-                  {t.name} ({t.marked ? `${t.marked} marked spaces` : "no marked spaces"})
+                  {t.name} ({t.length} spaces, {t.spaces.length ? `${t.spaces.length} marked` : "none marked"})
                 </option>
               ))}
             </select>

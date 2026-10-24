@@ -88,7 +88,9 @@ export interface RosterRacer {
 
 export interface RosterInfo {
   racers: RosterRacer[];
-  tracks: { key: string; name: string; length: number; marked: number }[];
+  tracks: (TrackInfo & { key: string })[];
+  /** Track files that can't be raced, with the reason. */
+  track_errors: { key: string; error: string }[];
   defaults: { games: number; track: string; players: number; places: number };
   limits: { max_games: number; cpu_count: number };
 }

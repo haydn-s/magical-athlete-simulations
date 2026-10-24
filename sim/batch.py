@@ -78,6 +78,7 @@ def config_to_json(config, track_key, replaced):
         "seed": config.seed,
         "track": track_key,
         "track_name": config.track.name,
+        "track_spec": tracks.track_to_json(config.track),
         "racers_per_game": config.racers_per_game,
         "places_to_award": config.places_to_award,
         "focus": [e.name for e in config.focus],
@@ -88,8 +89,11 @@ def config_to_json(config, track_key, replaced):
 
 
 def config_from_json(data, games=None):
+    # Runs record their track's layout, so they replay correctly even after the
+    # track file changes; older runs only have the track's key.
+    spec = data.get("track_spec")
     return BatchConfig(
-        track=tracks.lookup(data["track"]),
+        track=tracks.track_from_spec(spec) if spec else tracks.lookup(data["track"]),
         pool=tuple(roster.lookup(n) for n in data["pool"]),
         focus=tuple(roster.lookup(n) for n in data["focus"]),
         games=games if games is not None else data["games"],
@@ -121,7 +125,7 @@ def code_fingerprint():
 
 def default_out_dir(label, track_key, config, results_dir=RESULTS_DIR):
     """results/<timestamp>_<label>, made unique if a run already used that name this second."""
-    parts = [label] if label else [track_key.lower(), f"{config.games}g"]
+    parts = [label] if label else [tracks.track_key(track_key), f"{config.games}g"]
     if config.focus and not label:
         parts.append("focus-" + "+".join(e.name for e in config.focus))
     slug = re.sub(r"[^A-Za-z0-9+_.-]", "", re.sub(r"\s+", "-", "_".join(parts).strip()))
@@ -184,7 +188,7 @@ def execute(config, *, track_key, replaced=(), label=None, out_dir=None, workers
         "python": platform.python_version(),
         "git": git_state(),
         "code_fingerprint": code_fingerprint(),
-        "config": config_to_json(config, track_key.lower(), list(replaced)),
+        "config": config_to_json(config, tracks.track_key(track_key), list(replaced)),
     }
 
     if out_dir:

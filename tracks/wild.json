@@ -1,0 +1,16 @@
+{
+  "name": "Wild Wilds",
+  "length": 30,
+  "spaces": {
+    "1": { "points": 1 },
+    "5": { "trip": true },
+    "7": { "move": 3 },
+    "11": { "move": 1 },
+    "13": { "points": 1 },
+    "16": { "move": -4 },
+    "17": { "trip": true },
+    "23": { "move": 2 },
+    "24": { "move": -2 },
+    "26": { "trip": true }
+  }
+}

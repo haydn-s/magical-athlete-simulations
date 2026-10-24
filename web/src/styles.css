@@ -1359,3 +1359,21 @@ a.button.primary {
     max-height: 45vh;
   }
 }
+
+/* --- tracks ---------------------------------------------------------------- */
+
+.template {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 12.5px;
+}
+.error-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.error-list code {
+  white-space: normal;
+}

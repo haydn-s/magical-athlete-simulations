@@ -11,7 +11,7 @@ import threading
 import time
 from collections import OrderedDict
 
-from sim import batch
+from sim import batch, tracks
 
 MAX_GAMES = 2_000_000
 MAX_NAMES = 200
@@ -93,7 +93,7 @@ def parse_request(data):
         raise JobError(exc.args[0] if exc.args else str(exc)) from None
 
     settings["seed"] = config.seed  # a random seed is fixed now, so the job can show it
-    settings["track"] = track.lower()
+    settings["track"] = tracks.track_key(track)
     settings["label"] = _optional_str(data, "label", MAX_LABEL)
     settings["save_games"] = save_games
     settings["workers"] = workers

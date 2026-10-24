@@ -20,9 +20,10 @@ const roster: RosterInfo = {
     { name: "Comet", identifier: 56, default: false, variant_of: null },
   ],
   tracks: [
-    { key: "mild", name: "Mild Mile", length: 30, marked: 0 },
-    { key: "wild", name: "Wild Wilds", length: 30, marked: 10 },
+    { key: "mild", name: "Mild Mile", length: 30, spaces: [] },
+    { key: "wild", name: "Wild Wilds", length: 30, spaces: [{ position: 5, trip: true, move: 0, points: 0 }] },
   ],
+  track_errors: [],
   defaults: { games: 10000, track: "wild", players: 7, places: 2 },
   limits: { max_games: 2_000_000, cpu_count: 8 },
 };

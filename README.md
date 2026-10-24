@@ -31,7 +31,7 @@ If you leave out `--seed`, a random one is picked and recorded.
 | Option | Default | |
 | --- | --- | --- |
 | `-n, --games` | 10000 | games to simulate |
-| `--track` | `wild` | `wild` or `mild` (see `sim/tracks.py`) |
+| `--track` | `wild` | a track key from `tracks/`, or a path to a track file |
 | `--players` | 7 | racers per game |
 | `--places` | 2 | finishers before the race ends (5 and 3 point chips) |
 | `--focus NAME` | | seat this racer in every game (repeatable) |
@@ -208,12 +208,46 @@ back when a Scoocher is near the finish). `ScoocherPowerWeakened` doesn't subcla
 - **Faster.** The engine runs about 800 games/s per core. 50,000 games took
   about 60s in MultiSim and about 5s on 18 cores.
 
-## Known track assumptions
+## Designing your own tracks
 
-Some powers hard-code positions for a 30-space track: Crossing Guard's crosswalk
-(27), Mad Bomber's bombs (8, 20, 29), High Five (multiples of 5) and Blimp's
-halfway point (15). New tracks of other lengths will run, but those racers won't
-play as designed.
+Tracks are JSON files in `tracks/`. The file name is the track's key, so
+`tracks/sprint.json` is raced with `--track sprint`, and it also appears in the
+viewer's New run form and on its **Tracks** page:
+
+```json
+{
+  "name": "Sprint",
+  "length": 40,
+  "spaces": {
+    "3": { "points": 1 },
+    "9": { "trip": true },
+    "14": { "move": 4 },
+    "22": { "move": -3 },
+    "31": { "trip": true, "points": 1 }
+  }
+}
+```
+
+- Spaces run from 1 to `length − 1`. Start is 0 and the finish line is `length`.
+- A space can give a point chip (`points`), trip (`trip`), or be an arrow
+  (`move`, negative to go back). It can combine these.
+- Lengths from 10 to 200 work. Arrows can't point off the track.
+- Mistakes get a plain explanation, in `python -m sim list` and on the Tracks
+  page. Files are re-read when they change, so edit and reload.
+- `--track path/to/file.json` races a track file that lives anywhere.
+- Every run saves its track's layout, so a run still replays correctly after
+  the file changes or is deleted.
+
+Racers that care about the board use positions relative to the track. On the
+30-space tracks they behave exactly as before (52,000 reference games came out
+identical):
+
+| Racer | On a 30-space track | On any track |
+| --- | --- | --- |
+| Crossing Guard | crosswalk on 27 | 3 before the finish, or the nearest unmarked space before that |
+| Mad Bomber | bombs on 8, 20, 29 | the same fractions of the track, moved off marked spaces |
+| High Five | spaces 5–25 | every multiple of 5 before the finish |
+| Blimp | +3 below space 15 | +3 below the halfway point |
 
 ## Tests
 

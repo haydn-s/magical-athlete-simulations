@@ -117,15 +117,14 @@ def _is_loopback(host):
 
 
 def roster_info():
+    found, errors = tracks.scan()
     return {
         "racers": [
             {"name": e.name, "identifier": e.identifier, "default": e.in_default_pool, "variant_of": e.variant_of}
             for e in roster.ROSTER.values()
         ],
-        "tracks": [
-            {"key": key, "name": t.name, "length": t.length, "marked": len(t.spaces)}
-            for key, t in tracks.TRACKS.items()
-        ],
+        "tracks": [{"key": key, **tracks.track_to_json(t)} for key, t in found.items()],
+        "track_errors": [{"key": key, "error": message} for key, message in errors.items()],
         "defaults": DEFAULTS,
         "limits": {"max_games": MAX_GAMES, "cpu_count": os.cpu_count() or 1},
     }
