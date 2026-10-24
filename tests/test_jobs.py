@@ -13,6 +13,11 @@ from sim import batch, cli
 from sim.jobs import JobError, JobManager, parse_request
 
 
+def runs_in(folder):
+    """Run folders only (results/ also holds the hidden .jobs.json history)."""
+    return sorted(name for name in os.listdir(folder) if not name.startswith("."))
+
+
 def cli_config(argv, games):
     parser = argparse.ArgumentParser()
     cli.add_config_args(parser)
@@ -75,7 +80,7 @@ class JobManagerTest(unittest.TestCase):
 
         self.assertEqual(job.state, "done", job.error)
         self.assertEqual(job.done, 300)
-        self.assertEqual(os.listdir(self.results), [job.run_id])
+        self.assertEqual(runs_in(self.results), [job.run_id])
         self.assertTrue(job.run_id.endswith("_from-ui"), job.run_id)
         self.assertEqual(job.command, "python -m sim run -n 300 --seed 4 --focus Oddball --label 'from ui'")
 
@@ -108,7 +113,7 @@ class JobManagerTest(unittest.TestCase):
         self.manager.wait(job.id, timeout=60)
         self.assertEqual(job.state, "cancelled")
         self.assertLess(job.done, 2_000_000)
-        self.assertEqual(os.listdir(self.results), [])
+        self.assertEqual(runs_in(self.results), [])
 
     def test_cancel_queued_job(self):
         blocker = self.manager.submit({"games": 2_000_000, "seed": 1, "workers": 1})
@@ -118,7 +123,7 @@ class JobManagerTest(unittest.TestCase):
         self.manager.cancel(blocker.id)
         self.manager.wait(blocker.id, timeout=60)
         self.assertEqual(queued.done, 0)
-        self.assertEqual(os.listdir(self.results), [])
+        self.assertEqual(runs_in(self.results), [])
 
     @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores folder permissions")
     def test_failed_job_reports_error(self):
@@ -134,6 +139,99 @@ class JobManagerTest(unittest.TestCase):
             os.chmod(self.results, 0o700)
         self.assertEqual(job.state, "failed")
         self.assertIn("PermissionError", job.error)
+
+
+class JobHistoryTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.results = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def restart(self, previous):
+        previous.shutdown()
+        return JobManager(self.results, mp_context=None)
+
+    def test_jobs_survive_a_restart(self):
+        manager = JobManager(self.results, mp_context=None)
+        job = manager.submit({"games": 100, "seed": 1, "workers": 1, "label": "kept"})
+        manager.wait(job.id, timeout=60)
+
+        manager = self.restart(manager)
+        self.assertEqual(manager.list(), [])  # nothing is running in the new session...
+        [entry] = manager.snapshots()  # ...but the finished job is remembered
+        self.assertEqual((entry["id"], entry["state"], entry["run_id"], entry["label"]),
+                         (job.id, "done", job.run_id, "kept"))
+        self.assertEqual(manager.snapshot(job.id)["done"], 100)
+        self.assertEqual(manager.cancel(job.id)["state"], "done")  # finished jobs can't be cancelled
+        manager.shutdown()
+
+    def test_unfinished_jobs_come_back_interrupted(self):
+        # The server stopped mid-run, leaving a half-written folder next to a finished run.
+        os.makedirs(os.path.join(self.results, "half-written"))
+        os.makedirs(os.path.join(self.results, "finished"))
+        open(os.path.join(self.results, "finished", "summary.json"), "w").close()
+        with open(os.path.join(self.results, ".jobs.json"), "w") as f:
+            json.dump([
+                {"id": "abc", "state": "running", "done": 500, "total": 1000, "remaining_sec": 3, "folder": "half-written"},
+                {"id": "def", "state": "running", "folder": "finished"},
+                {"id": "ghi", "state": "running", "folder": "../escape"},
+            ], f)
+
+        manager = JobManager(self.results, mp_context=None)
+        entries = manager.snapshots()
+        self.assertEqual([e["state"] for e in entries], ["interrupted"] * 3)
+        self.assertIn("server stopped", entries[0]["error"])
+        self.assertIsNone(entries[0]["remaining_sec"])
+        self.assertEqual(runs_in(self.results), ["finished"])  # only the half-written folder is removed
+        manager.shutdown()
+
+    def test_progress_is_saved_while_running(self):
+        from sim import jobs
+        manager = JobManager(self.results, mp_context=None)
+        original, jobs.SAVE_PROGRESS_EVERY = jobs.SAVE_PROGRESS_EVERY, 0
+        try:
+            job = manager.submit({"games": 2_000_000, "seed": 1, "workers": 1})
+            deadline = time.time() + 30
+            while job.done < 1000 and time.time() < deadline:
+                time.sleep(0.01)
+            with open(os.path.join(self.results, ".jobs.json")) as f:
+                saved = json.load(f)[0]
+            self.assertEqual(saved["state"], "running")
+            self.assertGreater(saved["done"], 0)
+            self.assertTrue(saved["folder"])
+        finally:
+            jobs.SAVE_PROGRESS_EVERY = original
+            manager.cancel(job.id)
+            manager.wait(job.id, timeout=60)
+            manager.shutdown()
+
+    def test_clear_finished_keeps_active_jobs(self):
+        manager = JobManager(self.results, mp_context=None)
+        done = manager.submit({"games": 50, "seed": 1, "workers": 1})
+        manager.wait(done.id, timeout=60)
+        running = manager.submit({"games": 2_000_000, "seed": 2, "workers": 1})
+
+        self.assertEqual(manager.clear_finished(), 1)
+        self.assertEqual([e["id"] for e in manager.snapshots()], [running.id])
+        manager.cancel(running.id)
+        manager.wait(running.id, timeout=60)
+
+        manager = self.restart(manager)
+        self.assertEqual([e["state"] for e in manager.snapshots()], ["cancelled"])
+        manager.shutdown()
+
+    def test_unreadable_history_is_ignored(self):
+        with open(os.path.join(self.results, ".jobs.json"), "w") as f:
+            f.write("{not json")
+        manager = JobManager(self.results, mp_context=None)
+        self.assertEqual(manager.snapshots(), [])
+        job = manager.submit({"games": 50, "seed": 1, "workers": 1})
+        manager.wait(job.id, timeout=60)
+        with open(os.path.join(self.results, ".jobs.json")) as f:
+            self.assertEqual([e["id"] for e in json.load(f)], [job.id])
+        manager.shutdown()
 
 
 class SpawnedWorkersTest(unittest.TestCase):

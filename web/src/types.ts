@@ -110,7 +110,7 @@ export interface JobRequest {
   from_run?: string;
 }
 
-export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";
+export type JobState = "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted";
 
 export interface Job {
   id: string;

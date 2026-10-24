@@ -3,10 +3,14 @@ Background batch runs started from the web viewer (POST /api/jobs).
 
 Jobs run one at a time on a worker thread (each batch already uses every CPU
 core) and save their results to results/ exactly like `python -m sim run`.
+The job list is kept in results/.jobs.json, so it survives server restarts;
+jobs that were running when the server stopped come back as "interrupted".
 """
+import json
 import os
 import queue
 import secrets
+import shutil
 import threading
 import time
 from collections import OrderedDict
@@ -17,9 +21,13 @@ MAX_GAMES = 2_000_000
 MAX_NAMES = 200
 MAX_LABEL = 60
 KEEP_FINISHED = 50
+HISTORY_FILE = ".jobs.json"
+HISTORY_LIMIT = 200
+SAVE_PROGRESS_EVERY = 5  # seconds
 
 DEFAULTS = {"games": 10_000, "track": "wild", "players": 7, "places": 2}
 ACTIVE_STATES = ("queued", "running")
+INTERRUPTED = "The server stopped before this run finished, so nothing was saved."
 
 
 class JobError(ValueError):
@@ -117,6 +125,7 @@ class Job:
         self.started = None
         self.finished = None
         self.run_id = None
+        self.folder = None  # results/ folder being written while running
         self.error = None
         self.cancel_requested = threading.Event()
 
@@ -141,24 +150,28 @@ class Job:
             "rate": round(rate, 1),
             "remaining_sec": None if remaining is None else round(remaining, 1),
             "run_id": self.run_id,
+            "folder": self.folder,
             "error": self.error,
         }
 
 
 class JobManager:
-    def __init__(self, results_dir=batch.RESULTS_DIR, mp_context="spawn"):
+    def __init__(self, results_dir=batch.RESULTS_DIR, mp_context="spawn", keep_history=True):
         self.results_dir = results_dir
         self.mp_context = mp_context
-        self._jobs = OrderedDict()
+        self._jobs = OrderedDict()  # this session's jobs
         self._lock = threading.Lock()
         self._queue = queue.Queue()
         self._thread = None
+        self._history_path = os.path.join(results_dir, HISTORY_FILE) if keep_history else None
+        self._history = self._load_history()  # snapshots from earlier sessions, newest first
 
     def submit(self, data):
         job = Job(*parse_request(data))
         with self._lock:
             self._jobs[job.id] = job
             self._trim()
+            self._save()
             if self._thread is None:
                 self._thread = threading.Thread(target=self._work, name="sim-jobs", daemon=True)
                 self._thread.start()
@@ -166,21 +179,47 @@ class JobManager:
         return job
 
     def get(self, job_id):
+        """A job from this session (None for older ones; see snapshot())."""
         with self._lock:
             return self._jobs.get(job_id)
 
     def list(self):
+        """This session's jobs, newest first."""
         with self._lock:
             return list(reversed(self._jobs.values()))
 
+    def snapshots(self):
+        """Every job as JSON-ready data, this session's first, then earlier ones."""
+        with self._lock:
+            live = [job.to_json() for job in reversed(self._jobs.values())]
+            ids = {entry["id"] for entry in live}
+            return live + [entry for entry in self._history if entry["id"] not in ids]
+
+    def snapshot(self, job_id):
+        return next((entry for entry in self.snapshots() if entry["id"] == job_id), None)
+
     def cancel(self, job_id):
+        """Stop a queued or running job. Returns its snapshot, or None if there's no such job."""
         job = self.get(job_id)
         if job is not None and job.state in ACTIVE_STATES:
             job.cancel_requested.set()
             if job.state == "queued":
                 job.state = "cancelled"
                 job.finished = time.time()
-        return job
+                with self._lock:
+                    self._save()
+        return self.snapshot(job_id)
+
+    def clear_finished(self):
+        """Forget every job that isn't queued or running. Returns how many were removed."""
+        with self._lock:
+            finished = [job_id for job_id, job in self._jobs.items() if job.state not in ACTIVE_STATES]
+            for job_id in finished:
+                del self._jobs[job_id]
+            removed = len(finished) + len(self._history)
+            self._history = []
+            self._save()
+        return removed
 
     def wait(self, job_id, timeout=None):
         """Block until a job finishes (for tests and scripts). Returns the job."""
@@ -196,6 +235,45 @@ class JobManager:
         for job in self.list():
             self.cancel(job.id)
         self._queue.put(None)
+
+    def _load_history(self):
+        if not self._history_path:
+            return []
+        try:
+            with open(self._history_path) as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return []
+        entries = [e for e in data if isinstance(e, dict) and isinstance(e.get("id"), str)] if isinstance(data, list) else []
+        for entry in entries:
+            if entry.get("state") in ACTIVE_STATES:
+                entry.update(state="interrupted", error=INTERRUPTED, remaining_sec=None)
+                self._remove_partial_run(entry.get("folder"))
+        return entries
+
+    def _remove_partial_run(self, folder):
+        """Delete the half-written folder of a run the server stopped mid-way (never a finished run)."""
+        if not isinstance(folder, str) or not folder or folder.startswith(".") or os.sep in folder or "/" in folder:
+            return
+        path = os.path.join(self.results_dir, folder)
+        if os.path.isdir(path) and not os.path.exists(os.path.join(path, "summary.json")):
+            shutil.rmtree(path, ignore_errors=True)
+
+    def _save(self):
+        """Write the job list to results/.jobs.json. Call with the lock held; failures are ignored."""
+        if not self._history_path:
+            return
+        live = [job.to_json() for job in reversed(self._jobs.values())]
+        ids = {entry["id"] for entry in live}
+        entries = (live + [entry for entry in self._history if entry["id"] not in ids])[:HISTORY_LIMIT]
+        temp = self._history_path + ".tmp"
+        try:
+            os.makedirs(self.results_dir, exist_ok=True)
+            with open(temp, "w") as f:
+                json.dump(entries, f)
+            os.replace(temp, self._history_path)
+        except OSError:
+            pass  # history is a convenience; never let it stop a run
 
     def _trim(self):
         finished = [j for j in self._jobs.values() if j.state not in ACTIVE_STATES]
@@ -213,9 +291,22 @@ class JobManager:
 
     def _run(self, job):
         settings = job.settings
+        out_dir = batch.default_out_dir(settings["label"], settings["track"], job.config, self.results_dir)
         job.state = "running"
         job.started = time.time()
-        out_dir = batch.default_out_dir(settings["label"], settings["track"], job.config, self.results_dir)
+        job.folder = os.path.basename(out_dir)
+        with self._lock:
+            self._save()
+        last_save = time.time()
+
+        def progress(done, total):
+            nonlocal last_save
+            job.done = done
+            if time.time() - last_save >= SAVE_PROGRESS_EVERY:
+                last_save = time.time()
+                with self._lock:
+                    self._save()
+
         try:
             batch.execute(
                 job.config,
@@ -226,17 +317,21 @@ class JobManager:
                 workers=settings["workers"],
                 save_games=settings["save_games"],
                 command=job.command,
-                on_progress=lambda done, total: setattr(job, "done", done),
+                on_progress=progress,
                 should_stop=job.cancel_requested.is_set,
                 mp_context=self.mp_context,
             )
         except batch.Cancelled:
             job.state = "cancelled"
+            job.folder = None  # execute() already removed it
         except Exception as exc:
             job.state = "failed"
             job.error = f"{type(exc).__name__}: {exc}"
+            job.folder = None
         else:
-            job.run_id = os.path.basename(out_dir)
+            job.run_id = job.folder
             job.state = "done"
         finally:
             job.finished = time.time()
+            with self._lock:
+                self._save()

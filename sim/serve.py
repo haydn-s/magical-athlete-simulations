@@ -10,10 +10,11 @@ web/dist, and starts new runs in the background. Binds to 127.0.0.1 by default.
     GET  /api/runs/<id>/games         game numbers and lineups (?racer=&start=&limit=)
     GET  /api/runs/<id>/games/<n>     turn-by-turn replay of game n
     GET  /api/roster                  racers, tracks and limits for the run form
-    GET  /api/jobs                    runs started from the viewer, newest first
+    GET  /api/jobs                    runs started from the viewer, newest first (kept across restarts)
     GET  /api/jobs/<id>               one job's state and progress
     POST /api/jobs                    start a run (JSON body, see sim/jobs.py)
     POST /api/jobs/<id>/cancel        stop a queued or running job
+    POST /api/jobs/clear              forget finished jobs (their results stay)
 
 Starting runs costs real CPU and writes to results/, so POST requests must be
 JSON sent from the viewer's own origin, and on a loopback address requests
@@ -155,12 +156,12 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/roster":
             return self.send_json(roster_info())
         if path == "/api/jobs":
-            return self.send_json([job.to_json() for job in self.jobs.list()])
+            return self.send_json(self.jobs.snapshots())
         if path.startswith("/api/jobs/"):
-            job = self.jobs.get(unquote(path[len("/api/jobs/"):]))
+            job = self.jobs.snapshot(unquote(path[len("/api/jobs/"):]))
             if job is None:
                 return self.send_error(HTTPStatus.NOT_FOUND)
-            return self.send_json(job.to_json())
+            return self.send_json(job)
         if path.startswith("/api/"):
             return self.send_error(HTTPStatus.NOT_FOUND)
         if not os.path.isfile(os.path.join(self.directory, "index.html")):
@@ -198,11 +199,13 @@ class Handler(SimpleHTTPRequestHandler):
             except JobError as exc:
                 return self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
             return self.send_json(job.to_json(), HTTPStatus.ACCEPTED)
+        if path == "/api/jobs/clear":
+            return self.send_json({"cleared": self.jobs.clear_finished()})
         if path.startswith("/api/jobs/") and path.endswith("/cancel"):
             job = self.jobs.cancel(unquote(path[len("/api/jobs/"):-len("/cancel")]))
             if job is None:
                 return self.send_error(HTTPStatus.NOT_FOUND)
-            return self.send_json(job.to_json())
+            return self.send_json(job)
         return self.send_error(HTTPStatus.NOT_FOUND)
 
     def same_site(self, origin):

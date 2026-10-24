@@ -174,6 +174,14 @@ class JobsApiTest(unittest.TestCase):
         self.assertEqual(self.jobs.wait(job["id"], timeout=60).state, "cancelled")
         self.assertEqual(self.request("/api/jobs/nope/cancel", {})[0], 404)
 
+    def test_clear_finished(self):
+        status, job = self.request("/api/jobs", {"games": 50, "seed": 8, "workers": 1})
+        self.jobs.wait(job["id"], timeout=60)
+        status, body = self.request("/api/jobs/clear", {})
+        self.assertEqual(status, 200)
+        self.assertGreaterEqual(body["cleared"], 1)
+        self.assertEqual(self.request(f"/api/jobs/{job['id']}")[0], 404)
+
     def test_rejects_requests_a_web_page_could_forge(self):
         # Simple cross-site form posts can't set a JSON content type...
         status, _ = self.request("/api/jobs", b'{"games": 10}', headers={"Content-Type": "text/plain"})
