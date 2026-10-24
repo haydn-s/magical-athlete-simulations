@@ -12,7 +12,7 @@ import {
   sortRows,
   useSort,
 } from "../components/ui";
-import { downloadUrl, useRun } from "../lib/api";
+import { downloadUrl, useLoad, useRun } from "../lib/api";
 import { href } from "../lib/router";
 import { niceMax } from "../lib/scale";
 import {
@@ -104,6 +104,9 @@ function RunHeader({ runId, summary }: { runId: string; summary: Summary }) {
           <a className="button small" href={href.compare(runId)}>
             Compare with another run
           </a>
+          <a className="button small" href={href.game(runId, 0)}>
+            Watch a game
+          </a>
           <a className="button small" href={href.newRun(runId)}>
             New run from this
           </a>
@@ -121,8 +124,8 @@ function RunHeader({ runId, summary }: { runId: string; summary: Summary }) {
 
       {totals.errors > 0 && (
         <Notice tone="critical">
-          <strong>{int(totals.errors)} games raised an error</strong> and are left out of these numbers. They’re listed in{" "}
-          <code>errors.jsonl</code>; replay one with <code>python -m sim replay --from results/{runId} --game N</code>.
+          <strong>{int(totals.errors)} games raised an error</strong> and are left out of these numbers. Watch one to
+          see where it went wrong: <FailedGames runId={runId} />
         </Notice>
       )}
       {totals.stalled > 0 && (
@@ -387,5 +390,31 @@ function SeatsView({ summary }: { summary: Summary }) {
         />
       )}
     </Card>
+  );
+}
+
+/** Links to replays of the first games that crashed (from errors.jsonl). */
+function FailedGames({ runId }: { runId: string }) {
+  const failed = useLoad(async () => {
+    const response = await fetch(downloadUrl(runId, "errors.jsonl"));
+    if (!response.ok) return [];
+    const text = await response.text();
+    return text
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => (JSON.parse(line) as { game: number }).game);
+  }, [runId]);
+
+  if (failed.status !== "ready") return null;
+  const shown = failed.data.slice(0, 8);
+  return (
+    <span className="inline-links">
+      {shown.map((game) => (
+        <a key={game} href={href.game(runId, game)}>
+          game {int(game)}
+        </a>
+      ))}
+      {failed.data.length > shown.length && <span className="muted"> and {int(failed.data.length - shown.length)} more</span>}
+    </span>
   );
 }

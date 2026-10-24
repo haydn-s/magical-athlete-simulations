@@ -36,3 +36,14 @@ def lookup(key):
         return TRACKS[key.lower()]
     except KeyError:
         raise KeyError(f"Unknown track {key!r}. Known tracks: {', '.join(TRACKS)}") from None
+
+
+def track_to_json(track):
+    return {
+        "name": track.name,
+        "length": track.length,
+        "spaces": [
+            {"position": position, "trip": space.trip, "move": space.move, "points": space.points}
+            for position, space in sorted(track.spaces.items())
+        ],
+    }

@@ -7,6 +7,8 @@ web/dist, and starts new runs in the background. Binds to 127.0.0.1 by default.
     GET  /api/runs                    run list (manifest + totals for each run)
     GET  /api/runs/<id>               full summary.json for one run
     GET  /api/runs/<id>/files/<name>  download racers.csv, head_to_head.csv, ...
+    GET  /api/runs/<id>/games         game numbers and lineups (?racer=&start=&limit=)
+    GET  /api/runs/<id>/games/<n>     turn-by-turn replay of game n
     GET  /api/roster                  racers, tracks and limits for the run form
     GET  /api/jobs                    runs started from the viewer, newest first
     GET  /api/jobs/<id>               one job's state and progress
@@ -23,10 +25,11 @@ import os
 from functools import partial
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
-from sim import roster, tracks
+from sim import batch, roster, tracks
 from sim.jobs import DEFAULTS, MAX_GAMES, JobError, JobManager
+from sim.replay import find_games, record_game
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(ROOT, "results")
@@ -144,11 +147,12 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if not self.host_allowed():
             return self.send_error(HTTPStatus.FORBIDDEN, "Unexpected Host header")
-        path = urlparse(self.path).path
+        url = urlparse(self.path)
+        path = url.path
         if path == "/api/runs":
             return self.send_json(self.store.list_runs())
         if path.startswith("/api/runs/"):
-            return self.handle_run(unquote(path[len("/api/runs/"):]))
+            return self.handle_run(unquote(path[len("/api/runs/"):]), parse_qs(url.query))
         if path == "/api/roster":
             return self.send_json(roster_info())
         if path == "/api/jobs":
@@ -208,29 +212,61 @@ class Handler(SimpleHTTPRequestHandler):
             return False
         return _is_loopback(origin_host) or origin_host == _hostname(self.headers.get("Host"))
 
-    def handle_run(self, rest):
-        run_id, _, tail = rest.partition("/files/")
-        if tail:
-            if tail not in DOWNLOADABLE:
-                return self.send_error(HTTPStatus.NOT_FOUND)
-            run_dir = self.store.run_dir(run_id)
-            file_path = run_dir and os.path.join(run_dir, tail)
-            if not file_path or not os.path.isfile(file_path):
-                return self.send_error(HTTPStatus.NOT_FOUND)
-            with open(file_path, "rb") as f:
-                body = f.read()
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", DOWNLOADABLE[tail])
-            self.send_header("Content-Disposition", f'attachment; filename="{run_id}_{tail}"')
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-
+    def handle_run(self, rest, query):
+        # <id> | <id>/files/<name> | <id>/games | <id>/games/<n>; ids are plain folder names.
+        run_id, *tail = rest.split("/")
         summary = self.store.summary(run_id)
         if summary is None:
             return self.send_error(HTTPStatus.NOT_FOUND)
-        return self.send_json(summary)
+        if not tail:
+            return self.send_json(summary)
+        if len(tail) == 2 and tail[0] == "files":
+            return self.send_file(run_id, tail[1])
+        if tail[0] == "games" and len(tail) <= 2:
+            return self.handle_games(summary, tail[1] if len(tail) == 2 else None, query)
+        return self.send_error(HTTPStatus.NOT_FOUND)
+
+    def send_file(self, run_id, name):
+        if name not in DOWNLOADABLE:
+            return self.send_error(HTTPStatus.NOT_FOUND)
+        file_path = os.path.join(self.store.run_dir(run_id), name)
+        if not os.path.isfile(file_path):
+            return self.send_error(HTTPStatus.NOT_FOUND)
+        with open(file_path, "rb") as f:
+            body = f.read()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", DOWNLOADABLE[name])
+        self.send_header("Content-Disposition", f'attachment; filename="{run_id}_{name}"')
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def handle_games(self, summary, game, query):
+        manifest = summary.get("manifest", {})
+        try:
+            config = batch.config_from_json(manifest["config"])
+        except KeyError as exc:
+            # Usually a racer or track that has since been renamed or removed.
+            message = exc.args[0] if exc.args else str(exc)
+            return self.send_json({"error": f"This run can't be replayed with the current code: {message}"},
+                                  HTTPStatus.CONFLICT)
+
+        if game is None:
+            racer = (query.get("racer") or [None])[0]
+            try:
+                start = int((query.get("start") or ["0"])[0])
+                limit = min(100, max(1, int((query.get("limit") or ["20"])[0])))
+            except ValueError:
+                return self.send_json({"error": "start and limit must be whole numbers."}, HTTPStatus.BAD_REQUEST)
+            games, next_start = find_games(config, racer=racer, start=start, limit=limit)
+            return self.send_json({"games": games, "next": next_start, "total": config.games})
+
+        if not game.isdigit() or int(game) >= config.games:
+            return self.send_json({"error": f"Game numbers run from 0 to {config.games - 1:,}."},
+                                  HTTPStatus.NOT_FOUND)
+        replay = record_game(config, int(game))
+        replay["code_changed"] = manifest.get("code_fingerprint") != batch.code_fingerprint()
+        return self.send_json(replay)
 
     def send_json(self, data, status=HTTPStatus.OK):
         body = json.dumps(data).encode()

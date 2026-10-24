@@ -5,6 +5,7 @@ import { ComparePage } from "./pages/ComparePage";
 import { JobsPage } from "./pages/JobsPage";
 import { NewRunPage } from "./pages/NewRunPage";
 import { RacerPage } from "./pages/RacerPage";
+import { ReplayPage } from "./pages/ReplayPage";
 import { RunPage } from "./pages/RunPage";
 import { RunsPage } from "./pages/RunsPage";
 
@@ -13,7 +14,7 @@ export function App() {
 
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [route.page, "runId" in route ? route.runId : null, "racer" in route ? route.racer : null]);
+  }, [route.page, "runId" in route ? route.runId : null, "racer" in route ? route.racer : null, "game" in route ? route.game : null]);
 
   return (
     <>
@@ -24,7 +25,7 @@ export function App() {
             <span className="brand-text">Magical Athlete Results</span>
           </a>
           <nav className="nav" aria-label="Main">
-            <a href={href.runs()} aria-current={route.page === "runs" || route.page === "run" || route.page === "racer" ? "page" : undefined}>
+            <a href={href.runs()} aria-current={["runs", "run", "racer", "game"].includes(route.page) ? "page" : undefined}>
               Runs
             </a>
             <a href={href.compare()} aria-current={route.page === "compare" ? "page" : undefined}>
@@ -53,6 +54,8 @@ function Page({ route }: { route: Route }) {
       return <RunPage key={route.runId} runId={route.runId} tab={route.tab} />;
     case "racer":
       return <RacerPage key={`${route.runId}/${route.racer}`} runId={route.runId} racer={route.racer} />;
+    case "game":
+      return <ReplayPage key={`${route.runId}/${route.game}`} runId={route.runId} game={route.game} />;
     case "compare":
       return <ComparePage a={route.a} b={route.b} />;
     case "new":

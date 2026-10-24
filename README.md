@@ -54,7 +54,9 @@ python -m sim replay --from results/<run folder> --game 1234
 ```
 
 This re-runs game 1234 of that batch and prints its full turn-by-turn log. It
-warns you if the engine or roster has changed since the run.
+warns you if the engine or roster has changed since the run. To watch the same
+game on an animated board, open the run in the [results viewer](#results-viewer)
+and choose **Watch a game**.
 
 ### Comparing two runs
 
@@ -88,7 +90,14 @@ there only when you start a run from the viewer. You get:
 - **Head-to-head:** a heatmap of how often each racer finished ahead of each
   other racer. Hover for the numbers, click to open a racer.
 - **Turn order:** win rate by seat.
-- **Racer:** headline stats, finishing-place distribution and every matchup.
+- **Racer:** headline stats, finishing-place distribution, every matchup, and a
+  list of games that racer was in.
+- **Game replay:** watch any game from a run, turn by turn. Racers move around an
+  animated board (arrows, trip spaces, point spaces, Mad Bomber's bombs and the
+  Crossing Guard's crosswalk included) with the game log alongside. Step a line or
+  a turn at a time, play at up to 8× speed, scrub, or click a log line to jump
+  there. Keys: ←/→ step, Shift+←/→ jump a turn, Space plays. Games that crashed
+  are linked from their run, so you can watch them fail.
 - **Compare:** racer-by-racer changes between two runs, flagging the significant
   ones and pairing each variant with its base racer.
 - **New run:** start a batch from the browser. Pick the track, games, seed, focus
@@ -221,6 +230,7 @@ These cover the harness, not racer mechanics:
   could forge
 - runs started from the viewer: validation, cancelling, and results that match
   the CLI
+- game replays: the same placings and points as the batch, one frame per log line
 - an end-to-end test of `python -m sim serve` (runs once `web/dist` is built)
 
 The viewer's own tests run with `npm test` in `web/`.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Job, JobRequest, RosterInfo, RunListItem, Summary } from "../types";
+import type { GameList, Job, JobRequest, Replay, RosterInfo, RunListItem, Summary } from "../types";
 
 // Served by `python -m sim serve` (proxied by `npm run dev`).
 
@@ -53,6 +53,19 @@ export function fetchRun(runId: string): Promise<Summary> {
     summaries.set(runId, request);
   }
   return request;
+}
+
+export function fetchReplay(runId: string, game: number): Promise<Replay> {
+  return getJson<Replay>(`api/runs/${encodeURIComponent(runId)}/games/${game}`);
+}
+
+export function fetchGames(runId: string, options: { racer?: string; start?: number; limit?: number } = {}): Promise<GameList> {
+  const params = new URLSearchParams();
+  if (options.racer) params.set("racer", options.racer);
+  if (options.start) params.set("start", String(options.start));
+  if (options.limit) params.set("limit", String(options.limit));
+  const query = params.toString();
+  return getJson<GameList>(`api/runs/${encodeURIComponent(runId)}/games${query ? `?${query}` : ""}`);
 }
 
 export function downloadUrl(runId: string, file: string): string {

@@ -14,6 +14,12 @@
   --link: #1c5cab;
   --series-1: #2a78d6;
   --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
   --div-pos: #2a78d6;
   --div-neg: #e34948;
   --div-mid: #f0efec;
@@ -42,6 +48,12 @@
     --link: #86b6ef;
     --series-1: #3987e5;
     --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
     --div-pos: #3987e5;
     --div-neg: #e66767;
     --div-mid: #383835;
@@ -64,6 +76,12 @@
   --link: #86b6ef;
   --series-1: #3987e5;
   --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
   --div-pos: #3987e5;
   --div-neg: #e66767;
   --div-mid: #383835;
@@ -1064,5 +1082,280 @@ a.button.primary {
   }
   .hide-sm {
     display: none;
+  }
+}
+
+/* --- replay ---------------------------------------------------------------- */
+
+.replay {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 20px;
+  align-items: start;
+}
+.replay-main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.board {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--font);
+}
+.board .route {
+  fill: none;
+  stroke: var(--grid);
+  stroke-width: 18;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.board .space rect,
+.board .zone rect {
+  fill: var(--surface-1);
+  stroke: var(--axis);
+  stroke-width: 1;
+}
+.board .zone rect {
+  fill: var(--surface-2);
+}
+.board .space-trip rect {
+  fill: color-mix(in srgb, var(--status-warning) 22%, var(--surface-1));
+}
+.board .space-forward rect {
+  fill: color-mix(in srgb, var(--div-pos) 18%, var(--surface-1));
+}
+.board .space-back rect {
+  fill: color-mix(in srgb, var(--div-neg) 18%, var(--surface-1));
+}
+.board .space-number {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.board .space-label,
+.board .zone-label {
+  fill: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.board .crosswalk rect {
+  fill: var(--text-secondary);
+  stroke: none;
+}
+.board .bomb circle {
+  fill: var(--text-primary);
+}
+.board .bomb path {
+  fill: none;
+  stroke: var(--status-critical);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.token {
+  transition: transform 260ms ease;
+}
+.token-body {
+  stroke: var(--surface-1);
+  stroke-width: 2;
+}
+.token-text {
+  fill: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  text-anchor: middle;
+  stroke: rgba(0, 0, 0, 0.55);
+  stroke-width: 2.5px;
+  paint-order: stroke;
+  pointer-events: none;
+}
+.token .actor-ring {
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 2.5;
+}
+.token.is-tripped .token-body,
+.token.is-tripped .token-text {
+  opacity: 0.5;
+}
+.token.is-eliminated {
+  opacity: 0.3;
+}
+.token .trip-mark,
+.token .out-mark {
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.token-swatch {
+  flex: none;
+  overflow: visible;
+}
+@media (prefers-reduced-motion: reduce) {
+  .token {
+    transition: none;
+  }
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.controls .play {
+  min-width: 72px;
+  justify-content: center;
+}
+.controls .speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+.scrubber {
+  width: 100%;
+  margin: 12px 0 6px;
+  accent-color: var(--series-1);
+}
+.step-text {
+  min-height: 2.9em;
+  font-size: 13.5px;
+}
+.step-text strong {
+  font-weight: 500;
+}
+
+.standings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.standings li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 6px;
+  border-radius: 6px;
+}
+.standings li.is-actor {
+  background: var(--surface-2);
+}
+.standings li.is-actor .standings-name {
+  font-weight: 600;
+}
+.standings-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.standings-where {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.standings-points {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: right;
+}
+.final {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--grid);
+}
+.final h3 {
+  font-size: 13.5px;
+  margin-bottom: 6px;
+}
+.final ol {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  color: var(--text-secondary);
+}
+
+.game-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(70vh, 760px);
+  overflow-y: auto;
+  font-size: 12.5px;
+  position: relative;
+}
+.game-log button {
+  all: unset;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 8px;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.game-log button:hover {
+  background: var(--surface-2);
+}
+.game-log button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+}
+.game-log .turn-line {
+  margin-top: 8px;
+}
+.game-log .turn-line button {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.game-log .active button {
+  background: var(--text-primary);
+  color: var(--page);
+}
+
+.game-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.game-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+.game-chip:hover {
+  background: var(--surface-2);
+  text-decoration: none;
+}
+.game-chip .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inline-links {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+@media (max-width: 960px) {
+  .replay {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .game-log {
+    max-height: 45vh;
   }
 }
