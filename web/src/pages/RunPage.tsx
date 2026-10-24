@@ -104,6 +104,9 @@ function RunHeader({ runId, summary }: { runId: string; summary: Summary }) {
           <a className="button small" href={href.compare(runId)}>
             Compare with another run
           </a>
+          <a className="button small" href={href.newRun(runId)}>
+            New run from this
+          </a>
           <a className="button small" href={downloadUrl(runId, "racers.csv")}>
             racers.csv
           </a>

@@ -44,6 +44,24 @@ export function Badge({ children }: { children: ReactNode }) {
   return <span className="badge">{children}</span>;
 }
 
+export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied("done");
+    } catch {
+      setCopied("failed"); // clipboard access can be blocked; the text stays selectable
+    }
+    setTimeout(() => setCopied("idle"), 1500);
+  };
+  return (
+    <button type="button" className="button small" onClick={copy} aria-live="polite">
+      {copied === "done" ? "Copied" : copied === "failed" ? "Select to copy" : label}
+    </button>
+  );
+}
+
 export function Notice({ tone, children }: { tone: "warning" | "critical" | "info"; children: ReactNode }) {
   return (
     <div className="notice" role={tone === "info" ? undefined : "status"}>

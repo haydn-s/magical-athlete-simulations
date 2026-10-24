@@ -78,7 +78,8 @@ python -m sim serve
 ```
 
 Then open the address it prints (`http://127.0.0.1:8000`; pass `--port` to change
-it). The server only reads `results/` and only listens on your own machine. You get:
+it). The server only listens on your own machine. It reads `results/`, and writes
+there only when you start a run from the viewer. You get:
 
 - **Runs:** every saved run with its track, size, focus racers and seed. Tick two
   runs to compare them.
@@ -90,9 +91,26 @@ it). The server only reads `results/` and only listens on your own machine. You 
 - **Racer:** headline stats, finishing-place distribution and every matchup.
 - **Compare:** racer-by-racer changes between two runs, flagging the significant
   ones and pairing each variant with its base racer.
+- **New run:** start a batch from the browser. Pick the track, games, seed, focus
+  racers and pool, and see the equivalent `python -m sim run` command as you go.
+- **Jobs:** live progress for runs started from the viewer, with cancel, and links
+  to the results when they finish.
 
 Every chart has a table view or CSV download, and the viewer follows your
 light/dark setting.
+
+### Testing a variant without the command line
+
+1. Open the run you want as the baseline (for example a `--focus Pendulum` run)
+   and choose **New run from this**. The form copies its settings, including the
+   seed.
+2. Swap the focus racer for your variant and choose **Start run**.
+3. When the job finishes, choose **Compare with the original**.
+
+Runs started this way go through the same code as `python -m sim run`, so the same
+settings and seed give identical results either way. Runs execute one at a time,
+each using every core. Cancelling a run stops it within a second or so and keeps
+nothing.
 
 To work on the UI with hot reload, run `python -m sim serve` in one terminal and
 `npm run dev` in `web/` in another. Vite forwards `/api` requests to port 8000; set
@@ -194,7 +212,25 @@ play as designed.
 python -m unittest discover tests
 ```
 
-These cover the harness, not racer mechanics: determinism across seeds, worker
-counts and hash seeds; focus and variant lineups; consistent stats; error
-capture; and the viewer's API, including rejecting paths outside `results/`.
+These cover the harness, not racer mechanics:
+
+- determinism across seeds, worker counts and hash seeds
+- focus and variant lineups
+- consistent stats and error capture
+- the viewer's API: rejecting paths outside `results/`, and requests a web page
+  could forge
+- runs started from the viewer: validation, cancelling, and results that match
+  the CLI
+- an end-to-end test of `python -m sim serve` (runs once `web/dist` is built)
+
 The viewer's own tests run with `npm test` in `web/`.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`:
+
+| Job | Checks |
+| --- | --- |
+| Python 3.10 / 3.12 / 3.14 | the unit tests, plus a CLI smoke run of `run`, `replay` and `compare` |
+| Web app | `npm ci`, typecheck, unit tests and production build. The built viewer is uploaded as the `results-viewer` artifact (kept 14 days). |
+| End-to-end | the real `python -m sim serve` with that build: load the app, start a run through the API, read its results back |

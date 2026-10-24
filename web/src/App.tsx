@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
+import { isActive, useJobs } from "./lib/jobs";
 import { href, useRoute, type Route } from "./lib/router";
 import { ComparePage } from "./pages/ComparePage";
+import { JobsPage } from "./pages/JobsPage";
+import { NewRunPage } from "./pages/NewRunPage";
 import { RacerPage } from "./pages/RacerPage";
 import { RunPage } from "./pages/RunPage";
 import { RunsPage } from "./pages/RunsPage";
@@ -27,6 +30,10 @@ export function App() {
             <a href={href.compare()} aria-current={route.page === "compare" ? "page" : undefined}>
               Compare
             </a>
+            <a href={href.newRun()} aria-current={route.page === "new" ? "page" : undefined}>
+              New run
+            </a>
+            <JobsLink current={route.page === "jobs"} />
           </nav>
           <ThemeToggle />
         </div>
@@ -48,6 +55,10 @@ function Page({ route }: { route: Route }) {
       return <RacerPage key={`${route.runId}/${route.racer}`} runId={route.runId} racer={route.racer} />;
     case "compare":
       return <ComparePage a={route.a} b={route.b} />;
+    case "new":
+      return <NewRunPage from={route.from} />;
+    case "jobs":
+      return <JobsPage />;
     case "not-found":
       return (
         <div className="empty">
@@ -58,6 +69,21 @@ function Page({ route }: { route: Route }) {
         </div>
       );
   }
+}
+
+function JobsLink({ current }: { current: boolean }) {
+  const { jobs } = useJobs();
+  const active = jobs?.filter(isActive).length ?? 0;
+  return (
+    <a href={href.jobs()} aria-current={current ? "page" : undefined}>
+      Jobs
+      {active > 0 && (
+        <span className="nav-count" aria-label={`${active} running or queued`}>
+          {active}
+        </span>
+      )}
+    </a>
+  );
 }
 
 function BrandMark() {
@@ -112,7 +138,8 @@ function ThemeToggle() {
       aria-label={`Theme: ${theme}. Switch to ${next}.`}
       title={`Theme: ${theme}`}
     >
-      {theme === "system" ? "Auto" : theme === "light" ? "Light" : "Dark"} theme
+      {theme === "system" ? "Auto" : theme === "light" ? "Light" : "Dark"}
+      <span className="hide-sm"> theme</span>
     </button>
   );
 }

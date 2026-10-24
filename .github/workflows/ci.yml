@@ -1,0 +1,109 @@
+# Checks every pull request and every push to main.
+#
+#   python      unit tests on the oldest and newest supported Pythons, plus a CLI smoke run
+#   web         typecheck, unit tests and production build of the results viewer;
+#               the built viewer is kept as the "results-viewer" artifact
+#   end-to-end  the real `python -m sim serve` with that build: load the app, start a
+#               run through the API and read its results back
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Unit tests
+        run: python -m unittest discover tests -v
+
+      - name: CLI smoke run (run, replay, compare)
+        run: |
+          python -m sim run -n 5000 --seed 1 --label ci-smoke --out "$RUNNER_TEMP/smoke"
+          python -m sim replay --from "$RUNNER_TEMP/smoke" --game 42 --no-log
+          python -m sim compare "$RUNNER_TEMP/smoke" "$RUNNER_TEMP/smoke" > /dev/null
+
+  web:
+    name: Web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npx vite build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: results-viewer
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 14
+
+  end-to-end:
+    name: End-to-end
+    needs: web
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: results-viewer
+          path: web/dist
+
+      - name: Serve the built viewer and start a run through the API
+        run: python -m unittest tests.test_e2e -v
+        env:
+          REQUIRE_E2E: "1"

@@ -1,13 +1,23 @@
 """
 Local web server for the results viewer: python -m sim serve
 
-Serves saved runs from results/ as JSON under /api, and the built React app
-from web/dist. Binds to 127.0.0.1 by default; nothing here writes to disk.
+Serves saved runs from results/ as JSON under /api, the built React app from
+web/dist, and starts new runs in the background. Binds to 127.0.0.1 by default.
 
-    GET /api/runs                    run list (manifest + totals for each run)
-    GET /api/runs/<id>               full summary.json for one run
-    GET /api/runs/<id>/files/<name>  download racers.csv, head_to_head.csv, ...
+    GET  /api/runs                    run list (manifest + totals for each run)
+    GET  /api/runs/<id>               full summary.json for one run
+    GET  /api/runs/<id>/files/<name>  download racers.csv, head_to_head.csv, ...
+    GET  /api/roster                  racers, tracks and limits for the run form
+    GET  /api/jobs                    runs started from the viewer, newest first
+    GET  /api/jobs/<id>               one job's state and progress
+    POST /api/jobs                    start a run (JSON body, see sim/jobs.py)
+    POST /api/jobs/<id>/cancel        stop a queued or running job
+
+Starting runs costs real CPU and writes to results/, so POST requests must be
+JSON sent from the viewer's own origin, and on a loopback address requests
+must name a loopback host (which blocks DNS-rebinding pages).
 """
+import ipaddress
 import json
 import os
 from functools import partial
@@ -15,9 +25,15 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
+from sim import roster, tracks
+from sim.jobs import DEFAULTS, MAX_GAMES, JobError, JobManager
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(ROOT, "results")
 WEB_DIST = os.path.join(ROOT, "web", "dist")
+
+LOOPBACK_NAMES = {"localhost", "127.0.0.1", "::1"}
+MAX_BODY = 64 * 1024
 
 DOWNLOADABLE = {
     "summary.json": "application/json",
@@ -76,22 +92,121 @@ class RunStore:
         return runs
 
 
+def _hostname(value):
+    """Host part of a Host header or Origin URL, lowercased, without port or brackets."""
+    if not value:
+        return None
+    if "://" not in value:
+        value = "//" + value
+    try:
+        return (urlparse(value).hostname or "").lower() or None
+    except ValueError:
+        return None
+
+
+def _is_loopback(host):
+    if host in LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def roster_info():
+    return {
+        "racers": [
+            {"name": e.name, "identifier": e.identifier, "default": e.in_default_pool, "variant_of": e.variant_of}
+            for e in roster.ROSTER.values()
+        ],
+        "tracks": [
+            {"key": key, "name": t.name, "length": t.length, "marked": len(t.spaces)}
+            for key, t in tracks.TRACKS.items()
+        ],
+        "defaults": DEFAULTS,
+        "limits": {"max_games": MAX_GAMES, "cpu_count": os.cpu_count() or 1},
+    }
+
+
 class Handler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, store, **kwargs):
+    def __init__(self, *args, store, jobs, loopback_only, **kwargs):
         self.store = store
+        self.jobs = jobs
+        self.loopback_only = loopback_only
         super().__init__(*args, **kwargs)
 
+    def host_allowed(self):
+        if not self.loopback_only:
+            return True
+        host = _hostname(self.headers.get("Host"))
+        return host is not None and _is_loopback(host)
+
     def do_GET(self):
+        if not self.host_allowed():
+            return self.send_error(HTTPStatus.FORBIDDEN, "Unexpected Host header")
         path = urlparse(self.path).path
         if path == "/api/runs":
             return self.send_json(self.store.list_runs())
         if path.startswith("/api/runs/"):
             return self.handle_run(unquote(path[len("/api/runs/"):]))
+        if path == "/api/roster":
+            return self.send_json(roster_info())
+        if path == "/api/jobs":
+            return self.send_json([job.to_json() for job in self.jobs.list()])
+        if path.startswith("/api/jobs/"):
+            job = self.jobs.get(unquote(path[len("/api/jobs/"):]))
+            if job is None:
+                return self.send_error(HTTPStatus.NOT_FOUND)
+            return self.send_json(job.to_json())
         if path.startswith("/api/"):
             return self.send_error(HTTPStatus.NOT_FOUND)
         if not os.path.isfile(os.path.join(self.directory, "index.html")):
             return self.send_text(HTTPStatus.NOT_FOUND, "The viewer isn't built yet. Run: cd web && npm install && npm run build\n")
         return super().do_GET()
+
+    def do_POST(self):
+        if not self.host_allowed():
+            return self.send_error(HTTPStatus.FORBIDDEN, "Unexpected Host header")
+        origin = self.headers.get("Origin")
+        if origin is not None and not self.same_site(origin):
+            return self.send_error(HTTPStatus.FORBIDDEN, "Cross-origin requests aren't allowed")
+        content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            return self.send_error(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "Send JSON")
+
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self.send_error(HTTPStatus.BAD_REQUEST, "Bad Content-Length")
+        if length > MAX_BODY:
+            # Read what was sent (up to a limit) so the client sees the 413, not a reset connection.
+            self.rfile.read(min(length, 16 * MAX_BODY))
+            self.close_connection = True
+            return self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        try:
+            data = json.loads(self.rfile.read(length) or b"{}")
+        except ValueError:
+            return self.send_json({"error": "The request body isn't valid JSON."}, HTTPStatus.BAD_REQUEST)
+
+        path = urlparse(self.path).path
+        if path == "/api/jobs":
+            try:
+                job = self.jobs.submit(data)
+            except JobError as exc:
+                return self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return self.send_json(job.to_json(), HTTPStatus.ACCEPTED)
+        if path.startswith("/api/jobs/") and path.endswith("/cancel"):
+            job = self.jobs.cancel(unquote(path[len("/api/jobs/"):-len("/cancel")]))
+            if job is None:
+                return self.send_error(HTTPStatus.NOT_FOUND)
+            return self.send_json(job.to_json())
+        return self.send_error(HTTPStatus.NOT_FOUND)
+
+    def same_site(self, origin):
+        origin_host = _hostname(origin)
+        if origin_host is None:
+            return False
+        return _is_loopback(origin_host) or origin_host == _hostname(self.headers.get("Host"))
 
     def handle_run(self, rest):
         run_id, _, tail = rest.partition("/files/")
@@ -117,9 +232,9 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_error(HTTPStatus.NOT_FOUND)
         return self.send_json(summary)
 
-    def send_json(self, data):
+    def send_json(self, data, status=HTTPStatus.OK):
         body = json.dumps(data).encode()
-        self.send_response(HTTPStatus.OK)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
@@ -138,9 +253,18 @@ class Handler(SimpleHTTPRequestHandler):
         pass
 
 
-def make_server(host="127.0.0.1", port=8000, results_dir=RESULTS_DIR, web_dir=WEB_DIST):
-    handler = partial(Handler, store=RunStore(results_dir), directory=web_dir)
-    return ThreadingHTTPServer((host, port), handler)
+def make_server(host="127.0.0.1", port=8000, results_dir=RESULTS_DIR, web_dir=WEB_DIST, jobs=None):
+    jobs = jobs or JobManager(results_dir)
+    handler = partial(
+        Handler,
+        store=RunStore(results_dir),
+        jobs=jobs,
+        loopback_only=_is_loopback(host.strip("[]").lower()),
+        directory=web_dir,
+    )
+    server = ThreadingHTTPServer((host, port), handler)
+    server.jobs = jobs
+    return server
 
 
 def serve(host="127.0.0.1", port=8000, results_dir=RESULTS_DIR):
@@ -153,4 +277,5 @@ def serve(host="127.0.0.1", port=8000, results_dir=RESULTS_DIR):
     except KeyboardInterrupt:
         pass
     finally:
+        server.jobs.shutdown()
         server.server_close()
