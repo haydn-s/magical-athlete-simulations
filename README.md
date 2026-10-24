@@ -10,9 +10,11 @@ against the standard racers.
 | `Powers.py` | Every racer's power and its in-race decision logic |
 | `Racers.py` | Racer classes (one per power) |
 | `sim/` | Batch simulator: parallel, reproducible runs with saved results |
+| `web/` | Results viewer: a React app for browsing and comparing saved runs |
 | `MultiSim.py` | The original single-process batch script (still works) |
 
-Python 3.10+ and the standard library only.
+The simulator needs Python 3.10+ and the standard library only. The results viewer
+also needs Node.js 22.12 or newer.
 
 ## Running simulations
 
@@ -62,6 +64,40 @@ python -m sim compare results/<baseline> results/<candidate>
 
 This prints each racer's points and win rate side by side, with the change and a
 z-score. A `*` marks win-rate changes that are significant at 95%.
+
+## Results viewer
+
+Build the viewer once (and again after pulling UI changes), then serve it:
+
+```bash
+cd web && npm install && npm run build
+```
+
+```bash
+python -m sim serve
+```
+
+Then open the address it prints (`http://127.0.0.1:8000`; pass `--port` to change
+it). The server only reads `results/` and only listens on your own machine. You get:
+
+- **Runs:** every saved run with its track, size, focus racers and seed. Tick two
+  runs to compare them.
+- **Leaderboard:** points per game and win rate with 95% intervals drawn inline,
+  against the field average and parity. Every column sorts, and there's a filter.
+- **Head-to-head:** a heatmap of how often each racer finished ahead of each
+  other racer. Hover for the numbers, click to open a racer.
+- **Turn order:** win rate by seat.
+- **Racer:** headline stats, finishing-place distribution and every matchup.
+- **Compare:** racer-by-racer changes between two runs, flagging the significant
+  ones and pairing each variant with its base racer.
+
+Every chart has a table view or CSV download, and the viewer follows your
+light/dark setting.
+
+To work on the UI with hot reload, run `python -m sim serve` in one terminal and
+`npm run dev` in `web/` in another. Vite forwards `/api` requests to port 8000; set
+`SIM_API=http://127.0.0.1:<port>` if the server is somewhere else. `npm test` runs
+the unit tests, and `npm run typecheck` checks types.
 
 ## Testing a new design
 
@@ -159,5 +195,6 @@ python -m unittest discover tests
 ```
 
 These cover the harness, not racer mechanics: determinism across seeds, worker
-counts and hash seeds; focus and variant lineups; consistent stats; and error
-capture.
+counts and hash seeds; focus and variant lineups; consistent stats; error
+capture; and the viewer's API, including rejecting paths outside `results/`.
+The viewer's own tests run with `npm test` in `web/`.
