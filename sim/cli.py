@@ -5,6 +5,7 @@ Command line for the batch simulator.
     python -m sim run -n 50000 --focus Oddball
     python -m sim replay --from results/<run> --game 1234
     python -m sim compare results/<run A> results/<run B>
+    python -m sim serve
     python -m sim list
 """
 import argparse
@@ -84,6 +85,7 @@ def config_to_json(config, track_key, replaced):
         "focus": [e.name for e in config.focus],
         "pool": [e.name for e in config.pool],
         "replaced": replaced,
+        "variants": {e.name: e.variant_of for e in config.pool + config.focus if e.variant_of},
     }
 
 
@@ -391,6 +393,13 @@ def cmd_list(args):
         print(f"  {key:6s} {track.name} ({track.length} spaces, {len(track.spaces)} marked)")
 
 
+# --- serve -------------------------------------------------------------------
+
+def cmd_serve(args):
+    from sim.serve import serve
+    serve(host=args.host, port=args.port, results_dir=os.path.abspath(args.results))
+
+
 # --- entry point -------------------------------------------------------------
 
 def main(argv=None):
@@ -423,6 +432,12 @@ def main(argv=None):
 
     lister = sub.add_parser("list", help="list racers and tracks")
     lister.set_defaults(func=cmd_list)
+
+    server = sub.add_parser("serve", help="browse saved runs in the web viewer")
+    server.add_argument("--host", default="127.0.0.1", help="interface to bind (default: 127.0.0.1)")
+    server.add_argument("--port", type=int, default=8000, help="port (default: 8000)")
+    server.add_argument("--results", default=RESULTS_DIR, help="results folder (default: results/)")
+    server.set_defaults(func=cmd_serve)
 
     args = parser.parse_args(argv)
     args.func(args)
