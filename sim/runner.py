@@ -5,10 +5,10 @@ Every game is derived only from (seed, game index): the lineup, seat order and
 dice are the same no matter how many worker processes run the batch, so any
 single game from a big run can be replayed with its full log.
 """
+import multiprocessing
 import os
 import random
 from dataclasses import dataclass
-from multiprocessing import Pool
 
 from Basics import Game, racer_score
 
@@ -26,6 +26,12 @@ class BatchConfig:
     seed: int = 0
 
     def __post_init__(self):
+        if self.games < 1:
+            raise ValueError("Games must be at least 1.")
+        if self.racers_per_game < 2:
+            raise ValueError("A game needs at least 2 racers.")
+        if not 1 <= self.places_to_award <= self.racers_per_game:
+            raise ValueError(f"Scoring places must be between 1 and {self.racers_per_game}.")
         open_seats = self.racers_per_game - len(self.focus)
         if open_seats < 0:
             raise ValueError(f"{len(self.focus)} focus racers don't fit in a {self.racers_per_game}-racer game.")
@@ -101,12 +107,13 @@ def play_chunk(task):
     return stop - start, tally, records
 
 
-def run_batch(config, workers=None, chunk_size=500, keep_records=False):
+def run_batch(config, workers=None, chunk_size=500, keep_records=False, mp_context=None):
     """
     Yield (games_done, tally, records) per chunk, in game order.
 
     Merge the tallies for the batch totals. `records` holds per-game dicts only
-    when keep_records is set.
+    when keep_records is set. `mp_context` picks the process start method
+    (e.g. "spawn"); the platform default is used when it's None.
     """
     tasks = [
         (config, start, min(start + chunk_size, config.games), keep_records)
@@ -118,5 +125,6 @@ def run_batch(config, workers=None, chunk_size=500, keep_records=False):
         yield from map(play_chunk, tasks)
         return
 
-    with Pool(workers) as pool:
+    context = multiprocessing.get_context(mp_context)
+    with context.Pool(workers) as pool:
         yield from pool.imap(play_chunk, tasks)

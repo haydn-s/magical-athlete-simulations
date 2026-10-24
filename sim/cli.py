@@ -9,24 +9,15 @@ Command line for the batch simulator.
     python -m sim list
 """
 import argparse
-import csv
-import hashlib
-import json
 import os
-import platform
-import random
-import re
-import subprocess
 import sys
 import time
-from datetime import datetime
 
-from sim import roster, tracks
-from sim.runner import BatchConfig, run_batch, setup_game
-from sim.stats import SORT_KEYS, Tally, summarize, two_proportion_z
+from sim import batch, roster, tracks
+from sim.runner import setup_game
+from sim.stats import SORT_KEYS, two_proportion_z
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RESULTS_DIR = os.path.join(ROOT, "results")
+RESULTS_DIR = batch.RESULTS_DIR
 
 
 # --- config ------------------------------------------------------------------
@@ -53,162 +44,74 @@ def _config_error(exc):
 
 def config_from_args(args, games):
     try:
-        pool, focus, replaced = roster.build_pool(
-            only=_names(args.only),
+        return batch.build_config(
+            games=games,
+            track=args.track,
+            players=args.players,
+            places=args.places,
+            seed=args.seed,
+            focus=_names(args.focus),
             include=_names(args.include),
             exclude=_names(args.exclude),
-            focus=_names(args.focus),
-        )
-        seed = args.seed if args.seed is not None else random.SystemRandom().randrange(2 ** 32)
-        config = BatchConfig(
-            track=tracks.lookup(args.track),
-            pool=tuple(pool),
-            focus=tuple(focus),
-            games=games,
-            racers_per_game=args.players,
-            places_to_award=args.places,
-            seed=seed,
+            only=_names(args.only),
         )
     except (KeyError, ValueError) as exc:
         raise _config_error(exc) from None
-    return config, replaced
-
-
-def config_to_json(config, track_key, replaced):
-    return {
-        "games": config.games,
-        "seed": config.seed,
-        "track": track_key,
-        "track_name": config.track.name,
-        "racers_per_game": config.racers_per_game,
-        "places_to_award": config.places_to_award,
-        "focus": [e.name for e in config.focus],
-        "pool": [e.name for e in config.pool],
-        "replaced": replaced,
-        "variants": {e.name: e.variant_of for e in config.pool + config.focus if e.variant_of},
-    }
 
 
 def config_from_json(data, games=None):
     try:
-        return BatchConfig(
-            track=tracks.lookup(data["track"]),
-            pool=tuple(roster.lookup(n) for n in data["pool"]),
-            focus=tuple(roster.lookup(n) for n in data["focus"]),
-            games=games if games is not None else data["games"],
-            racers_per_game=data["racers_per_game"],
-            places_to_award=data["places_to_award"],
-            seed=data["seed"],
-        )
+        return batch.config_from_json(data, games=games)
     except (KeyError, ValueError) as exc:
         raise _config_error(exc) from None
-
-
-def git_state():
-    try:
-        def git(*cmd):
-            return subprocess.run(["git", *cmd], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
-        return {"commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain", "--", "*.py"))}
-    except (OSError, subprocess.CalledProcessError):
-        return None
-
-
-def code_fingerprint():
-    """Hash of the engine and harness source, so a replay can tell if the code changed since a run."""
-    digest = hashlib.sha256()
-    paths = ["Basics.py", "Events.py", "Powers.py", "Racers.py", "sim/runner.py", "sim/roster.py", "sim/tracks.py"]
-    for path in (os.path.join(ROOT, p) for p in paths):
-        digest.update(os.path.relpath(path, ROOT).encode())
-        with open(path, "rb") as f:
-            digest.update(f.read())
-    return digest.hexdigest()[:16]
-
-
-def load_summary(path):
-    if os.path.isdir(path):
-        path = os.path.join(path, "summary.json")
-    with open(path) as f:
-        return json.load(f)
 
 
 # --- run ---------------------------------------------------------------------
 
 def cmd_run(args):
     config, replaced = config_from_args(args, args.games)
-    out_dir = None if args.no_save else (args.out or default_out_dir(args, config))
+    if args.no_save:
+        out_dir = None
+    else:
+        out_dir = args.out or batch.default_out_dir(args.label, args.track, config)
 
     if replaced:
         print(f"Variants racing in place of: {', '.join(replaced)}", file=sys.stderr)
 
-    games_file = None
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
-        if args.save_games:
-            games_file = open(os.path.join(out_dir, "games.jsonl"), "w")
-
-    tally = Tally(config.places_to_award)
-    workers = args.workers or os.cpu_count() or 1
     progress = Progress(config.games)
-    started = time.time()
-
-    try:
-        for done, part, records in run_batch(config, workers=workers, chunk_size=args.chunk_size,
-                                             keep_records=games_file is not None):
-            tally.merge(part)
-            if games_file:
-                for record in records:
-                    games_file.write(json.dumps(record, separators=(",", ":")) + "\n")
-            progress.advance(done)
-    finally:
-        if games_file:
-            games_file.close()
-
-    duration = time.time() - started
+    summary, _ = batch.execute(
+        config,
+        track_key=args.track,
+        replaced=replaced,
+        label=args.label,
+        out_dir=out_dir,
+        workers=args.workers,
+        chunk_size=args.chunk_size,
+        save_games=args.save_games,
+        sort=args.sort,
+        command=" ".join(["python -m sim"] + sys.argv[1:]),
+        on_progress=progress.update,
+    )
     progress.finish()
 
-    summary = summarize(tally, sort=args.sort)
-    summary["manifest"] = {
-        "label": args.label,
-        "created": datetime.now().isoformat(timespec="seconds"),
-        "command": " ".join(["python -m sim"] + sys.argv[1:]),
-        "duration_sec": round(duration, 2),
-        "workers": workers,
-        "python": platform.python_version(),
-        "git": git_state(),
-        "code_fingerprint": code_fingerprint(),
-        "config": config_to_json(config, args.track.lower(), replaced),
-    }
-
     print_summary(summary)
-
     if out_dir:
-        write_results(out_dir, summary, tally)
         print(f"\nResults saved to {os.path.relpath(out_dir)}")
-
-
-def default_out_dir(args, config):
-    parts = [args.label] if args.label else [args.track.lower(), f"{config.games}g"]
-    if config.focus and not args.label:
-        parts.append("focus-" + "+".join(e.name for e in config.focus))
-    slug = re.sub(r"[^A-Za-z0-9+_.-]", "", "_".join(parts))
-    return os.path.join(RESULTS_DIR, f"{datetime.now():%Y%m%d-%H%M%S}_{slug}")
 
 
 class Progress:
     def __init__(self, total):
         self.total = total
-        self.done = 0
         self.started = time.time()
         self.tty = sys.stderr.isatty()
         self.next_report = 0.1
 
-    def advance(self, n):
-        self.done += n
-        rate = self.done / max(time.time() - self.started, 1e-9)
-        line = f"  {self.done:,} / {self.total:,} games  ({rate:,.0f} games/s)"
+    def update(self, done, total):
+        rate = done / max(time.time() - self.started, 1e-9)
+        line = f"  {done:,} / {total:,} games  ({rate:,.0f} games/s)"
         if self.tty:
             print("\r" + line, end="", file=sys.stderr, flush=True)
-        elif self.done / self.total >= self.next_report:
+        elif done / total >= self.next_report:
             print(line, file=sys.stderr, flush=True)
             self.next_report += 0.1
 
@@ -253,42 +156,14 @@ def print_summary(summary):
               f"replay with `python -m sim replay --from <run dir> --game N`)")
 
 
-def write_results(out_dir, summary, tally):
-    with open(os.path.join(out_dir, "summary.json"), "w") as f:
-        json.dump(summary, f, indent=1)
-
-    columns = ["name", "games", "wins", "win_rate", "win_rate_lo", "win_rate_hi", "podium_rate",
-               "pts_per_game", "pts_lo", "pts_hi", "avg_place", "avg_progress", "finish_rate",
-               "elim_rate", "avg_game_turns"]
-    with open(os.path.join(out_dir, "racers.csv"), "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(columns)
-        for r in summary["racers"]:
-            row = dict(r, win_rate_lo=r["win_rate_ci"][0], win_rate_hi=r["win_rate_ci"][1],
-                       pts_lo=r["pts_ci"][0], pts_hi=r["pts_ci"][1])
-            writer.writerow([row[c] for c in columns])
-
-    h2h = summary["head_to_head"]
-    with open(os.path.join(out_dir, "head_to_head.csv"), "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["row placed ahead of column"] + h2h["names"])
-        for name, row in zip(h2h["names"], h2h["ahead_rate"]):
-            writer.writerow([name] + ["" if v is None else f"{v:.4f}" for v in row])
-
-    if tally.errors:
-        with open(os.path.join(out_dir, "errors.jsonl"), "w") as f:
-            for error in sorted(tally.errors, key=lambda e: e["game"]):
-                f.write(json.dumps(error) + "\n")
-
-
 # --- replay ------------------------------------------------------------------
 
 def cmd_replay(args):
     if args.source:
-        summary = load_summary(args.source)
+        summary = batch.load_summary(args.source)
         manifest = summary["manifest"]
         config = config_from_json(manifest["config"], games=args.game + 1)
-        if manifest.get("code_fingerprint") != code_fingerprint():
+        if manifest.get("code_fingerprint") != batch.code_fingerprint():
             print("Warning: the code has changed since this run, so the replay may differ.", file=sys.stderr)
     else:
         if args.seed is None:
@@ -327,7 +202,7 @@ def _variant_base(name):
 
 
 def cmd_compare(args):
-    a, b = load_summary(args.a), load_summary(args.b)
+    a, b = batch.load_summary(args.a), batch.load_summary(args.b)
     cfg_a, cfg_b = a["manifest"]["config"], b["manifest"]["config"]
 
     for key in ("track", "racers_per_game", "places_to_award"):

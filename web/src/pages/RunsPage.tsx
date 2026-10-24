@@ -27,7 +27,9 @@ export function RunsPage() {
     return (
       <div className="empty">
         <h2>No saved runs yet</h2>
-        <p>Run a batch from the repo root and it will show up here.</p>
+        <p>
+          <a href={href.newRun()}>Start a run here</a>, or run a batch from the repo root and it will show up.
+        </p>
         <pre>
           <code>python -m sim run -n 50000 --seed 1</code>
         </pre>
@@ -51,6 +53,9 @@ export function RunsPage() {
       </div>
 
       <div className="toolbar">
+        <a className="button primary" href={href.newRun()}>
+          New run
+        </a>
         <button
           type="button"
           className="button"
