@@ -2,10 +2,10 @@ import { useState } from "react";
 import { ColumnChart } from "../components/charts";
 import { Matchups, matchupsFor } from "../components/Matchups";
 import { Badge, Card, LoadError, Loading, StatTile } from "../components/ui";
-import { useRun } from "../lib/api";
+import { fetchGames, useLoad, useRun } from "../lib/api";
 import { href } from "../lib/router";
 import { int, num, ordinal, pct, runTitle } from "../lib/stats";
-import type { RacerStats, Summary } from "../types";
+import type { GameList, RacerStats, Summary } from "../types";
 
 export function RacerPage({ runId, racer }: { runId: string; racer: string }) {
   const run = useRun(runId);
@@ -93,6 +93,8 @@ function RacerView({ runId, title, summary, stats }: { runId: string; title: str
 
       <PlaceDistribution stats={stats} scoring={config.places_to_award} />
 
+      <RacerGames runId={runId} racer={stats.name} />
+
       <Card
         title="Matchups"
         note={`How often ${stats.name} finished ahead of each opponent when both raced. Faded rows have fewer than 20 races together.`}
@@ -161,6 +163,48 @@ function PlaceDistribution({ stats, scoring }: { stats: RacerStats; scoring: num
             ),
           }))}
         />
+      )}
+    </Card>
+  );
+}
+
+/** The first games this racer was in, each linking to its replay. */
+function RacerGames({ runId, racer }: { runId: string; racer: string }) {
+  const first = useLoad(() => fetchGames(runId, { racer, limit: 12 }), [runId, racer]);
+  const [more, setMore] = useState<GameList[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const pages = first.status === "ready" ? [first.data, ...more] : [];
+  const games = pages.flatMap((p) => p.games);
+  const next = pages.length ? pages[pages.length - 1].next : null;
+
+  const loadMore = async () => {
+    if (next === null) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchGames(runId, { racer, start: next, limit: 12 });
+      setMore((m) => [...m, page]);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  return (
+    <Card title={`Watch ${racer} race`} note="Replay any game turn by turn. Opponents are listed in turn order.">
+      {first.status === "error" && <p className="muted">Couldn’t list games: {first.error}</p>}
+      <div className="game-chips">
+        {games.map((g) => (
+          <a key={g.game} className="game-chip" href={href.game(runId, g.game)}>
+            <strong>Game {int(g.game)}</strong>
+            <span className="muted">{g.lineup.filter((n) => n !== racer).join(", ")}</span>
+          </a>
+        ))}
+      </div>
+      {first.status === "ready" && games.length === 0 && next === null && <p className="muted">No games found.</p>}
+      {next !== null && (
+        <button type="button" className="button small" onClick={loadMore} disabled={loadingMore} style={{ marginTop: 10 }}>
+          {games.length ? "More games" : "Keep looking"}
+        </button>
       )}
     </Card>
   );

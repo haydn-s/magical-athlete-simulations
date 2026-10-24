@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 //   #/                         runs
 //   #/run/<id>[/h2h|/seats]    one run
 //   #/run/<id>/racer/<name>    one racer in a run
+//   #/run/<id>/game/<n>        replay of one game
 //   #/compare?a=<id>&b=<id>    two runs side by side
 //   #/new[?from=<id>]          start a run (optionally from another run's settings)
 //   #/jobs                     runs started from the viewer
@@ -12,6 +13,7 @@ export type Route =
   | { page: "runs" }
   | { page: "run"; runId: string; tab: "leaderboard" | "h2h" | "seats" }
   | { page: "racer"; runId: string; racer: string }
+  | { page: "game"; runId: string; game: number }
   | { page: "compare"; a: string | null; b: string | null }
   | { page: "new"; from: string | null }
   | { page: "jobs" }
@@ -35,6 +37,9 @@ export function parseRoute(hash: string): Route {
       return { page: "run", runId, tab: parts[2] };
     }
     if (parts.length === 4 && parts[2] === "racer") return { page: "racer", runId, racer: parts[3] };
+    if (parts.length === 4 && parts[2] === "game" && /^\d+$/.test(parts[3])) {
+      return { page: "game", runId, game: Number(parts[3]) };
+    }
   }
   return { page: "not-found" };
 }
@@ -52,6 +57,7 @@ export const href = {
     const query = params.toString();
     return `#/compare${query ? `?${query}` : ""}`;
   },
+  game: (runId: string, game: number) => `#/run/${encodeURIComponent(runId)}/game/${game}`,
   newRun: (from?: string | null) => (from ? `#/new?from=${encodeURIComponent(from)}` : "#/new"),
   jobs: () => "#/jobs",
 };

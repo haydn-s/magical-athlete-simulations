@@ -85,6 +85,12 @@ class ServeEndToEndTest(unittest.TestCase):
         self.assertEqual(summary["manifest"]["config"]["focus"], ["Oddball"])
         self.assertEqual(summary["manifest"]["command"], job["command"])
 
+        replay = json.loads(self.get(f"/api/runs/{job['run_id']}/games/7")[1])
+        self.assertEqual(replay["game"], 7)
+        self.assertFalse(replay["code_changed"])
+        self.assertIn("Oddball", [r["name"] for r in replay["racers"]])
+        self.assertTrue(replay["frames"])
+
         self.server.send_signal(signal.SIGINT)
         self.assertEqual(self.server.wait(timeout=20), 0)
 

@@ -133,3 +133,55 @@ export interface Job {
   run_id: string | null;
   error: string | null;
 }
+
+// --- replays (sim/replay.py: /api/runs/<id>/games/<n>) ------------------------
+
+export interface TrackSpace {
+  position: number;
+  trip: boolean;
+  move: number;
+  points: number;
+}
+
+export interface TrackInfo {
+  name: string;
+  length: number;
+  spaces: TrackSpace[];
+}
+
+/** The board at one moment; racer arrays are indexed by seat - 1. */
+export interface ReplayState {
+  positions: number[];
+  status: ("" | "tripped" | "finished" | "eliminated")[];
+  points: number[];
+  finish_order: number[];
+  bombs: number[];
+}
+
+export interface ReplayFrame extends ReplayState {
+  text: string;
+  turn: number;
+  actor: number | null;
+}
+
+export interface Replay {
+  game: number;
+  seed: number;
+  track: TrackInfo;
+  places_to_award: number;
+  racers: { name: string; seat: number }[];
+  crosswalk: number | null;
+  initial: ReplayState;
+  frames: ReplayFrame[];
+  results: { seat: number; place: number; points: number; status: string }[];
+  turns: number;
+  stalled: boolean;
+  error: string | null;
+  code_changed: boolean;
+}
+
+export interface GameList {
+  games: { game: number; lineup: string[] }[];
+  next: number | null;
+  total: number;
+}
