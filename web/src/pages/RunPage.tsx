@@ -134,6 +134,18 @@ function RunHeader({ runId, summary }: { runId: string; summary: Summary }) {
           included, scored by position.
         </Notice>
       )}
+      {(config.overrides?.length ?? 0) > 0 && (
+        <Notice tone="info">
+          <strong>Changed settings:</strong>{" "}
+          {config.overrides!.map((o) => `${o.power}.${o.setting} = ${String(o.value)}`).join(", ")}.
+          {manifest.sweep && (
+            <>
+              {" "}
+              Part of <a href={href.sweep(manifest.sweep.id)}>a sweep</a>.
+            </>
+          )}
+        </Notice>
+      )}
       {config.replaced.length > 0 && (
         <Notice tone="info">
           Variants raced in place of <strong>{config.replaced.join(", ")}</strong>.

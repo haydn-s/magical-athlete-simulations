@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { GameList, Job, JobRequest, Replay, RosterInfo, RunListItem, Summary } from "../types";
+import type { GameList, Job, JobRequest, Replay, RosterInfo, RunListItem, Summary, Sweep, SweepListItem } from "../types";
 
 // Served by `python -m sim serve` (proxied by `npm run dev`).
 
@@ -57,6 +57,14 @@ export function fetchRun(runId: string): Promise<Summary> {
     summaries.set(runId, request);
   }
   return request;
+}
+
+export function fetchSweeps(): Promise<SweepListItem[]> {
+  return getJson<SweepListItem[]>("api/sweeps");
+}
+
+export function fetchSweep(id: string): Promise<Sweep> {
+  return getJson<Sweep>(`api/sweeps/${encodeURIComponent(id)}`);
 }
 
 export function fetchReplay(runId: string, game: number): Promise<Replay> {

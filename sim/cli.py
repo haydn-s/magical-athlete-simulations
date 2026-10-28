@@ -3,6 +3,9 @@ Command line for the batch simulator.
 
     python -m sim run -n 100000 --track wild --seed 538
     python -m sim run -n 50000 --focus Oddball
+    python -m sim run -n 50000 --set Sisyphus.STARTING_POINTS=3
+    python -m sim sweep -n 20000 --set Sisyphus.STARTING_POINTS=2..6
+    python -m sim sweep --list
     python -m sim replay --from results/<run> --game 1234
     python -m sim compare results/<run A> results/<run B>
     python -m sim serve
@@ -13,7 +16,7 @@ import os
 import sys
 import time
 
-from sim import batch, roster, tracks
+from sim import batch, roster, settings, sweep, tracks
 from sim.runner import setup_game
 from sim.stats import SORT_KEYS, two_proportion_z
 
@@ -37,10 +40,23 @@ def add_config_args(parser):
     parser.add_argument("--include", action="append", metavar="NAME", help="add an opt-in racer or variant to the pool")
     parser.add_argument("--exclude", action="append", metavar="NAME", help="remove a racer from the pool")
     parser.add_argument("--only", action="append", metavar="NAME", help="use exactly these racers as the pool")
+    parser.add_argument("--set", action="append", dest="assignments", metavar="RACER.SETTING=VALUE",
+                        help="change a power setting for this run, e.g. Sisyphus.STARTING_POINTS=3 "
+                             "(repeatable; `python -m sim sweep --list` shows them)")
 
 
 def _config_error(exc):
     return SystemExit(f"error: {exc.args[0] if exc.args else exc}")
+
+
+def overrides_from_args(args):
+    overrides = []
+    for text in args.assignments or ():
+        class_name, setting, values, _ = settings.parse_assignment(text)
+        if len(values) != 1:
+            raise settings.SettingError(f"{text!r} has {len(values)} values; to try several, use `python -m sim sweep`.")
+        overrides.append((class_name, setting, values[0]))
+    return overrides
 
 
 def config_from_args(args, games):
@@ -55,6 +71,7 @@ def config_from_args(args, games):
             include=_names(args.include),
             exclude=_names(args.exclude),
             only=_names(args.only),
+            overrides=overrides_from_args(args),
         )
     except (KeyError, ValueError) as exc:
         raise _config_error(exc) from None
@@ -78,6 +95,8 @@ def cmd_run(args):
 
     if replaced:
         print(f"Variants racing in place of: {', '.join(replaced)}", file=sys.stderr)
+    if config.overrides:
+        print(f"Changed settings: {settings.describe(config.overrides)}", file=sys.stderr)
 
     progress = Progress(config.games)
     summary, _ = batch.execute(
@@ -171,11 +190,13 @@ def cmd_replay(args):
             sys.exit("replay needs --seed (or --from <run dir>).")
         config, _ = config_from_args(args, games=args.game + 1)
 
-    game = setup_game(config, args.game)
-    print(f"Game {args.game} · seed {config.seed} · {config.track.name}")
-    print("Turn order: " + ", ".join(f"{seat}. {r.name}" for seat, r in enumerate(game.racers, 1)))
-
-    results = game.run_race()
+    with settings.applied(config.overrides):
+        game = setup_game(config, args.game)
+        print(f"Game {args.game} · seed {config.seed} · {config.track.name}")
+        if config.overrides:
+            print(f"Changed settings: {settings.describe(config.overrides)}")
+        print("Turn order: " + ", ".join(f"{seat}. {r.name}" for seat, r in enumerate(game.racers, 1)))
+        results = game.run_race()
 
     if not args.no_log:
         print("\nLog:")
@@ -191,6 +212,121 @@ def cmd_replay(args):
         else:
             status = f"space {racer.position}"
         print(f"{place}. {racer.name} ({status}) {racer.points} Points")
+
+
+# --- sweep -------------------------------------------------------------------
+
+def cmd_sweep(args):
+    if args.list:
+        print_tunables()
+        return
+    if not args.assignments:
+        sys.exit("error: give at least one --set RACER.SETTING=VALUES (see `python -m sim sweep --list`).")
+    try:
+        assignments = [settings.parse_assignment(text) for text in args.assignments]
+        points, _ = sweep.plan(assignments)
+    except (KeyError, ValueError) as exc:
+        raise _config_error(exc) from None
+
+    progress = Progress(args.games)
+
+    def on_point(step, total, point):
+        progress.started = time.time()
+        progress.next_report = 0.1
+        print(f"[{step + 1}/{total}] {sweep.point_label(point)}", file=sys.stderr)
+
+    try:
+        result = sweep.run_sweep(
+            assignments=assignments,
+            games=args.games,
+            seed=args.seed,
+            track=args.track,
+            players=args.players,
+            places=args.places,
+            focus=_names(args.focus),
+            include=_names(args.include),
+            exclude=_names(args.exclude),
+            only=_names(args.only),
+            label=args.label,
+            auto_focus=not args.no_auto_focus,
+            workers=args.workers,
+            command=" ".join(["python -m sim"] + sys.argv[1:]),
+            on_point=on_point,
+            on_progress=progress.update,
+        )
+    except (KeyError, ValueError) as exc:
+        raise _config_error(exc) from None
+    progress.finish()
+    print_sweep(result)
+
+
+def print_tunables():
+    rows = settings.tunables()
+    print("Settings you can change with --set (python -m sim run) or sweep (python -m sim sweep):\n")
+    print(f"{'Setting':42s} {'Current':>8s}  Racers")
+    for class_name, setting, value, racers in rows:
+        print(f"{class_name + '.' + setting:42s} {str(value):>8s}  {', '.join(racers) or '(no registered racer)'}")
+    print("\nName the power by its class or by a racer, e.g. Sisyphus.STARTING_POINTS=2..6.")
+    print("To make another number tunable, move it into a class attribute in capitals and read it as self.NAME.")
+
+
+def _signed(value, digits):
+    text = f"{abs(value):.{digits}f}"
+    return ("±" if float(text) == 0 else "+" if value > 0 else "−") + text
+
+
+def print_sweep(result):
+    cfg = result["config"]
+    swept = "; ".join(f"{s['power']}.{s['setting']} (now {s['current']})" for s in result["settings"])
+    print(f"\nSweep of {swept} · {cfg['games']:,} games per value · seed {cfg['seed']} · {cfg['track_name']}")
+    added = result["auto_focus"]
+    if len(added) == 1:
+        print(f"{added[0]} was added as a focus racer, so it's in every game.")
+    elif added:
+        print(f"{', '.join(added)} were added as focus racers, so they're in every game.")
+    if result["no_effect"]:
+        print("\nWarning: every value gave identical results, so this setting has no effect. "
+              "Check that the power actually reads it (as self.NAME).")
+
+    labels = [p["label"] + (" (current)" if p["current"] else "") for p in result["points"]]
+    width = max([16] + [len(label) for label in labels])
+    for name in result["subjects"]:
+        print(f"\n{name:{width}s} {'Win%':>5s} {'95% CI':>13s}  {'vs current':>21s}  {'Pts/G':>6s}  {'vs current':>21s}  "
+              f"{'Games changed':>13s}")
+        for point in result["points"]:
+            racer = next((r for r in point["racers"] if r["name"] == name), None)
+            if racer is None:
+                continue
+            paired = point["paired"][name]
+            win, pts = paired["win"], paired["pts"]
+            label = labels[result["points"].index(point)]
+
+            def delta(d, scale, digits):
+                if d is None or point["current"]:
+                    return "—"
+                mark = " *" if d["significant"] else "  "
+                lo, hi = (scale * v for v in d["ci"])
+                return f"{_signed(scale * d['delta'], digits)} [{_signed(lo, digits)}, {_signed(hi, digits)}]{mark}"
+
+            lo, hi = racer["win_rate_ci"]
+            print(
+                f"{label:{width}s} {100 * racer['win_rate']:5.1f} [{100 * lo:4.1f}, {100 * hi:4.1f}]  "
+                f"{delta(win, 100, 1):>21s}  {racer['pts_per_game']:6.2f}  {delta(pts, 1, 2):>21s}  "
+                f"{(pts['changed'] if pts and not point['current'] else 0):13,d}"
+            )
+        best = result["best"].get(name)
+        if best:
+            by_index = {p["index"]: p["label"] for p in result["points"]}
+            parity = f"{100 * result['parity']:.1f}%"
+            print(f"Win rate closest to parity ({parity}): {by_index[best['parity']]}." if best["parity"] is not None
+                  else "Win rate doesn't change with this setting.")
+            print(f"Points closest to the field average: {by_index[best['points']]}." if best["points"] is not None
+                  else "Points per game don't change with this setting.")
+
+    print("\n“vs current” compares each game with the same game at the current value (95% interval; "
+          "* = significant). Win changes are in percentage points.")
+    print(f"Saved {len(result['points'])} runs and results/{result['id']}/sweep.json. "
+          "Open it in the viewer with `python -m sim serve`.")
 
 
 # --- compare -----------------------------------------------------------------
@@ -296,6 +432,16 @@ def main(argv=None):
     run.add_argument("--save-games", action="store_true", help="also write every game to games.jsonl")
     run.add_argument("--sort", choices=list(SORT_KEYS), default="pts", help="table order (default: pts)")
     run.set_defaults(func=cmd_run)
+
+    sweeper = sub.add_parser("sweep", help="try several values of a power setting and compare them")
+    add_config_args(sweeper)
+    sweeper.add_argument("-n", "--games", type=int, default=10000, help="games per value (default: 10000)")
+    sweeper.add_argument("-j", "--workers", type=int, help="worker processes (default: all CPU cores)")
+    sweeper.add_argument("--label", help="name for this sweep, used in folder names")
+    sweeper.add_argument("--no-auto-focus", action="store_true",
+                         help="don't add the swept racers as focus racers (they'd race less often)")
+    sweeper.add_argument("--list", action="store_true", help="list every setting that can be changed")
+    sweeper.set_defaults(func=cmd_sweep)
 
     replay = sub.add_parser("replay", help="re-run one game from a batch and print its full log")
     add_config_args(replay)

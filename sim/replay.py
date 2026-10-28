@@ -10,6 +10,7 @@ and listens for StartTurnEvent to know whose turn it is.
 from Events import StartTurnEvent
 from Powers import CrossingGuardPower
 
+from sim import settings
 from sim.runner import lineup_for, setup_game
 from sim.tracks import track_to_json
 
@@ -66,16 +67,17 @@ class Recorder:
 
 def record_game(config, index):
     """Re-run one game of a batch and return every frame of it as JSON-ready data."""
-    game = setup_game(config, index)
-    recorder = Recorder(game)
-    initial = recorder.state()
+    with settings.applied(config.overrides, exclusive=True):
+        game = setup_game(config, index)
+        recorder = Recorder(game)
+        initial = recorder.state()
 
-    error = None
-    try:
-        results = game.run_race()
-    except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
-        results = game.get_results()
+        error = None
+        try:
+            results = game.run_race()
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            results = game.get_results()
 
     seat_of = {id(r): i for i, r in enumerate(game.racers)}
     crosswalk = next(

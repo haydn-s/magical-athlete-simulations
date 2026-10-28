@@ -17,7 +17,7 @@ import subprocess
 import time
 from datetime import datetime
 
-from sim import roster, tracks
+from sim import roster, settings, tracks
 from sim.runner import BatchConfig, run_batch
 from sim.stats import Tally, summarize
 
@@ -30,9 +30,10 @@ class Cancelled(Exception):
 
 
 def build_config(*, games, track="wild", players=7, places=2, seed=None,
-                 focus=(), include=(), exclude=(), only=()):
+                 focus=(), include=(), exclude=(), only=(), overrides=()):
     """
     Resolve settings and racer names into (BatchConfig, replaced).
+    `overrides` are (power class, setting, value) tuples; see sim/settings.py.
     Raises KeyError or ValueError with a readable message for bad input.
     """
     pool, focus, replaced = roster.build_pool(only=only, include=include, exclude=exclude, focus=focus)
@@ -46,12 +47,13 @@ def build_config(*, games, track="wild", players=7, places=2, seed=None,
         racers_per_game=players,
         places_to_award=places,
         seed=seed,
+        overrides=tuple(settings.check_override(*o) for o in overrides),
     )
     return config, replaced
 
 
 def equivalent_command(*, games, track="wild", players=7, places=2, seed=None, focus=(), include=(),
-                       exclude=(), only=(), label=None, save_games=False):
+                       exclude=(), only=(), label=None, save_games=False, overrides=()):
     """The `python -m sim run` command line that reproduces these settings."""
     parts = ["python", "-m", "sim", "run", "-n", str(games)]
     if seed is not None:
@@ -65,6 +67,9 @@ def equivalent_command(*, games, track="wild", players=7, places=2, seed=None, f
     for flag, names in (("--focus", focus), ("--only", only), ("--include", include), ("--exclude", exclude)):
         if names:
             parts += [flag, ",".join(names)]
+    for class_name, setting, value in overrides:
+        shown = str(value).lower() if isinstance(value, bool) else value
+        parts += ["--set", f"{class_name}.{setting}={shown}"]
     if label:
         parts += ["--label", label]
     if save_games:
@@ -85,6 +90,7 @@ def config_to_json(config, track_key, replaced):
         "pool": [e.name for e in config.pool],
         "replaced": replaced,
         "variants": {e.name: e.variant_of for e in config.pool + config.focus if e.variant_of},
+        "overrides": [{"power": c, "setting": k, "value": v} for c, k, v in config.overrides],
     }
 
 
@@ -100,6 +106,9 @@ def config_from_json(data, games=None):
         racers_per_game=data["racers_per_game"],
         places_to_award=data["places_to_award"],
         seed=data["seed"],
+        overrides=tuple(
+            settings.check_override(o["power"], o["setting"], o["value"]) for o in data.get("overrides", [])
+        ),
     )
 
 
@@ -128,7 +137,7 @@ def default_out_dir(label, track_key, config, results_dir=RESULTS_DIR):
     parts = [label] if label else [tracks.track_key(track_key), f"{config.games}g"]
     if config.focus and not label:
         parts.append("focus-" + "+".join(e.name for e in config.focus))
-    slug = re.sub(r"[^A-Za-z0-9+_.-]", "", re.sub(r"\s+", "-", "_".join(parts).strip()))
+    slug = re.sub(r"[^A-Za-z0-9+_.=-]", "", re.sub(r"\s+", "-", "_".join(parts).strip()))
     base = os.path.join(results_dir, f"{datetime.now():%Y%m%d-%H%M%S}_{slug}")
     path, n = base, 2
     while os.path.exists(path):
@@ -137,13 +146,16 @@ def default_out_dir(label, track_key, config, results_dir=RESULTS_DIR):
 
 
 def execute(config, *, track_key, replaced=(), label=None, out_dir=None, workers=None, chunk_size=500,
-            save_games=False, sort="pts", command=None, on_progress=None, should_stop=None, mp_context=None):
+            save_games=False, sort="pts", command=None, on_progress=None, on_records=None, should_stop=None,
+            mp_context=None, isolate=False, extra_manifest=None):
     """
     Run a batch, save its results to out_dir (if given) and return (summary, tally).
 
-    on_progress(done, total) is called after every chunk. If should_stop() returns
-    True the batch stops, nothing is kept, and Cancelled is raised. A folder this
-    call created is removed again if the batch doesn't finish.
+    on_progress(done, total) is called after every chunk, and on_records(records)
+    with that chunk's per-game records. If should_stop() returns True the batch
+    stops, nothing is kept, and Cancelled is raised. A folder this call created
+    is removed again if the batch doesn't finish. isolate=True keeps every game
+    out of this process (see run_batch); extra_manifest adds fields to the manifest.
     """
     workers = workers or os.cpu_count() or 1
     created_dir = bool(out_dir) and not os.path.exists(out_dir)
@@ -152,8 +164,9 @@ def execute(config, *, track_key, replaced=(), label=None, out_dir=None, workers
     games_file = open(os.path.join(out_dir, "games.jsonl"), "w") if out_dir and save_games else None
 
     tally = Tally(config.places_to_award)
-    batches = run_batch(config, workers=workers, chunk_size=chunk_size, keep_records=games_file is not None,
-                        mp_context=mp_context)
+    keep_records = games_file is not None or on_records is not None
+    batches = run_batch(config, workers=workers, chunk_size=chunk_size, keep_records=keep_records,
+                        mp_context=mp_context, isolate=isolate)
     started = time.time()
     done = 0
 
@@ -163,6 +176,8 @@ def execute(config, *, track_key, replaced=(), label=None, out_dir=None, workers
             if games_file:
                 for record in records:
                     games_file.write(json.dumps(record, separators=(",", ":")) + "\n")
+            if on_records:
+                on_records(records)
             done += n
             if on_progress:
                 on_progress(done, config.games)
@@ -189,6 +204,7 @@ def execute(config, *, track_key, replaced=(), label=None, out_dir=None, workers
         "git": git_state(),
         "code_fingerprint": code_fingerprint(),
         "config": config_to_json(config, tracks.track_key(track_key), list(replaced)),
+        **(extra_manifest or {}),
     }
 
     if out_dir:

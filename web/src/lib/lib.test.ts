@@ -140,6 +140,7 @@ describe("router", () => {
     expect(parseRoute(href.newRun("20261024_a b"))).toEqual({ page: "new", from: "20261024_a b", track: null });
     expect(parseRoute(href.newRun(null, "sprint"))).toEqual({ page: "new", from: null, track: "sprint" });
     expect(parseRoute(href.tracks())).toEqual({ page: "tracks" });
+    expect(parseRoute(href.sweep("20261024_sweep_chips"))).toEqual({ page: "sweep", sweepId: "20261024_sweep_chips" });
     expect(parseRoute(href.jobs())).toEqual({ page: "jobs" });
     expect(parseRoute("#/nope")).toEqual({ page: "not-found" });
     expect(parseRoute("#/run/x/racer")).toEqual({ page: "not-found" });
