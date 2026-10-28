@@ -9,6 +9,8 @@ web/dist, and starts new runs in the background. Binds to 127.0.0.1 by default.
     GET  /api/runs/<id>/files/<name>  download racers.csv, head_to_head.csv, ...
     GET  /api/runs/<id>/games         game numbers and lineups (?racer=&start=&limit=)
     GET  /api/runs/<id>/games/<n>     turn-by-turn replay of game n
+    GET  /api/sweeps                  parameter sweeps (python -m sim sweep), newest first
+    GET  /api/sweeps/<id>             one sweep's sweep.json
     GET  /api/roster                  racers, tracks and limits for the run form
     GET  /api/jobs                    runs started from the viewer, newest first (kept across restarts)
     GET  /api/jobs/<id>               one job's state and progress
@@ -28,9 +30,10 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from sim import batch, roster, tracks
+from sim import batch, roster, settings, tracks
 from sim.jobs import DEFAULTS, MAX_GAMES, JobError, JobManager
 from sim.replay import find_games, record_game
+from sim.sweep import SWEEP_FILE
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(ROOT, "results")
@@ -96,6 +99,36 @@ class RunStore:
         return runs
 
 
+class SweepStore:
+    """Sweeps saved by `python -m sim sweep`: results/<id>/sweep.json."""
+
+    def __init__(self, results_dir):
+        self.results_dir = results_dir
+
+    def load(self, sweep_id):
+        if not sweep_id or sweep_id.startswith(".") or "/" in sweep_id or "\\" in sweep_id:
+            return None
+        path = os.path.join(self.results_dir, sweep_id, SWEEP_FILE)
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def list(self):
+        if not os.path.isdir(self.results_dir):
+            return []
+        items = []
+        for name in os.listdir(self.results_dir):
+            sweep = self.load(name)
+            if sweep:
+                items.append({key: sweep.get(key) for key in
+                              ("id", "label", "created", "complete", "settings", "subjects", "config", "no_effect")}
+                             | {"points": len(sweep.get("points", []))})
+        items.sort(key=lambda s: s.get("created") or "", reverse=True)
+        return items
+
+
 def _hostname(value):
     """Host part of a Host header or Origin URL, lowercased, without port or brackets."""
     if not value:
@@ -126,14 +159,19 @@ def roster_info():
         ],
         "tracks": [{"key": key, **tracks.track_to_json(t)} for key, t in found.items()],
         "track_errors": [{"key": key, "error": message} for key, message in errors.items()],
+        "settings": [
+            {"power": c, "setting": k, "value": v, "type": type(v).__name__, "racers": racers}
+            for c, k, v, racers in settings.tunables()
+        ],
         "defaults": DEFAULTS,
         "limits": {"max_games": MAX_GAMES, "cpu_count": os.cpu_count() or 1},
     }
 
 
 class Handler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, store, jobs, loopback_only, **kwargs):
+    def __init__(self, *args, store, sweeps, jobs, loopback_only, **kwargs):
         self.store = store
+        self.sweeps = sweeps
         self.jobs = jobs
         self.loopback_only = loopback_only
         super().__init__(*args, **kwargs)
@@ -153,6 +191,13 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(self.store.list_runs())
         if path.startswith("/api/runs/"):
             return self.handle_run(unquote(path[len("/api/runs/"):]), parse_qs(url.query))
+        if path == "/api/sweeps":
+            return self.send_json(self.sweeps.list())
+        if path.startswith("/api/sweeps/"):
+            sweep = self.sweeps.load(unquote(path[len("/api/sweeps/"):]))
+            if sweep is None:
+                return self.send_error(HTTPStatus.NOT_FOUND)
+            return self.send_json(sweep)
         if path == "/api/roster":
             return self.send_json(roster_info())
         if path == "/api/jobs":
@@ -247,7 +292,7 @@ class Handler(SimpleHTTPRequestHandler):
         manifest = summary.get("manifest", {})
         try:
             config = batch.config_from_json(manifest["config"])
-        except KeyError as exc:
+        except (KeyError, ValueError) as exc:
             # Usually a racer or track that has since been renamed or removed.
             message = exc.args[0] if exc.args else str(exc)
             return self.send_json({"error": f"This run can't be replayed with the current code: {message}"},
@@ -296,6 +341,7 @@ def make_server(host="127.0.0.1", port=8000, results_dir=RESULTS_DIR, web_dir=WE
     handler = partial(
         Handler,
         store=RunStore(results_dir),
+        sweeps=SweepStore(results_dir),
         jobs=jobs,
         loopback_only=_is_loopback(host.strip("[]").lower()),
         directory=web_dir,

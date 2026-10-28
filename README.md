@@ -37,6 +37,7 @@ If you leave out `--seed`, a random one is picked and recorded.
 | `--include NAME` | | add an opt-in design or variant to the pool |
 | `--exclude NAME` | | remove a racer from the pool |
 | `--only NAME,...` | | use exactly these racers as the pool |
+| `--set RACER.SETTING=VALUE` | | change a power setting for this run, e.g. `Sisyphus.STARTING_POINTS=3` (repeatable) |
 | `-j, --workers` | all cores | worker processes |
 | `--label` | | name used in the results folder |
 | `--save-games` | off | also write every game to `games.jsonl` |
@@ -100,9 +101,14 @@ there only when you start a run from the viewer. You get:
 - **Compare:** racer-by-racer changes between two runs, flagging the significant
   ones and pairing each variant with its base racer.
 - **New run:** start a batch from the browser. Pick the track, games, seed, focus
-  racers and pool, and see the equivalent `python -m sim run` command as you go.
+  racers, pool and any power settings to change, and see the equivalent
+  `python -m sim run` command as you go.
 - **Jobs:** live progress for runs started from the viewer, with cancel, and links
   to the results when they finish.
+- **Sweeps:** each sweep's win rate and points per game against the setting's
+  value, which value comes closest to balanced, and every value compared with the
+  current one game by game. The runs a sweep made are tucked away on the Runs page
+  until you ask to see them.
 
 Every chart has a table view or CSV download, and the viewer follows your
 light/dark setting.
@@ -163,6 +169,56 @@ variant should look like a different racer. Other racers' decision logic checks
 for specific powers (Hypnotist targets Scoocher and Romantic; many powers hold
 back when a Scoocher is near the finish). `ScoocherPowerWeakened` doesn't subclass
 `ScoocherPower`, so those checks don't see it as a Scoocher.
+
+### Tuning a number with a sweep
+
+When a power has a number you're unsure about, sweep it instead of writing a
+variant:
+
+```bash
+python -m sim sweep -n 20000 --seed 7 --set RubberBand.MIN_GAIN=1..8
+```
+
+That runs the same 20,000 games once for each value. RubberBand is added as a
+focus racer so it's in every game. The current value (4) is included even if you
+leave it out. It prints, and the viewer's Sweeps page charts:
+
+- win rate and points per game at each value, with 95% intervals
+- each value compared with the current one **game by game**. Every value uses the
+  same seed, so game N has the same lineup at every value, and the comparison
+  picks up changes far too small to see by comparing two separate runs
+- which value comes closest to parity, and which comes closest to the field's
+  average points
+- a warning if the setting made no difference at all, which usually means the
+  power never reads it
+
+Values can be lists or ranges: `2,4,6`, `1..8`, `0..20:5` (every 5) or
+`0.5..1.5:0.25`. Repeat `--set` to sweep two settings together (every
+combination, up to 50). `python -m sim sweep --list` shows what's tunable:
+
+| Setting | Now |
+| --- | --- |
+| `Gambler.MAX_SAVED` | 5 |
+| `MadBomber.NUM_BOMBS` | 3 (not read by the code yet, so a sweep shows no effect) |
+| `RubberBand.MIN_GAIN` | 4 |
+| `Sisyphus.STARTING_POINTS` | 4 |
+| `Suckerfish.MIN_RIDE_DISTANCE` | 4 |
+
+To make another number tunable, move it into a class attribute in capitals and
+read it as `self.NAME` in the power:
+
+```python
+class PendulumPower(Power):
+    AHEAD_DIVISOR = 2
+
+    def before_main(self, game, event):
+        ...
+        modifier = ahead // self.AHEAD_DIVISOR - behind // 4
+```
+
+Every sweep value is saved as a normal run. You can open it, replay its games, or
+start a **New run from this**, which keeps the changed setting. Use
+`python -m sim run --set Racer.SETTING=VALUE` for a single run with one value.
 
 ## Results files
 
@@ -259,6 +315,9 @@ These cover the harness, not racer mechanics:
 - runs started from the viewer: validation, cancelling, and results that match
   the CLI
 - game replays: the same placings and points as the batch, one frame per log line
+- setting overrides and sweeps: parsing, applying and restoring settings, worker
+  processes, replays, the game-by-game comparison, and spotting settings with no
+  effect
 - an end-to-end test of `python -m sim serve` (runs once `web/dist` is built)
 
 The viewer's own tests run with `npm test` in `web/`.

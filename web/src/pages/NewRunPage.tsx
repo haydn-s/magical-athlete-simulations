@@ -9,6 +9,7 @@ import {
   equivalentCommand,
   formFromRun,
   replacedBases,
+  settingKey,
   toRequest,
   validate,
   type RunForm,
@@ -178,6 +179,7 @@ function NewRunForm({
 
       <FocusPicker roster={roster} form={form} update={update} />
       <PoolPicker roster={roster} form={form} update={update} poolSize={pool.length} />
+      {roster.settings.length > 0 && <SettingsCard roster={roster} form={form} update={update} />}
 
       <Card title="Options">
         <label className="check">
@@ -284,6 +286,62 @@ function FocusPicker({
             ))}
           </optgroup>
         </select>
+      </div>
+    </Card>
+  );
+}
+
+function SettingsCard({
+  roster,
+  form,
+  update,
+}: {
+  roster: RosterInfo;
+  form: RunForm;
+  update: (patch: Partial<RunForm>) => void;
+}) {
+  const set = (key: string, text: string) => update({ overrides: { ...form.overrides, [key]: text } });
+  const changed = roster.settings.filter((s) => {
+    const text = form.overrides[settingKey(s)]?.trim();
+    return text !== undefined && text !== "" && text !== String(s.value);
+  }).length;
+
+  return (
+    <Card
+      title={`Power settings${changed ? ` · ${changed} changed` : ""}`}
+      note="Change a racer’s tunable numbers for this run only; blank keeps the current value. To compare several values at once, use python -m sim sweep."
+      actions={
+        changed > 0 ? (
+          <button type="button" className="button small" onClick={() => update({ overrides: {} })}>
+            Reset all
+          </button>
+        ) : undefined
+      }
+    >
+      <div className="settings-grid">
+        {roster.settings.map((s) => {
+          const key = settingKey(s);
+          const text = form.overrides[key] ?? "";
+          const isChanged = text.trim() !== "" && text.trim() !== String(s.value);
+          return (
+            <label key={key} className={`field${isChanged ? " changed-setting" : ""}`}>
+              <span>
+                {s.racers.join(", ") || s.power} · {s.setting}
+              </span>
+              <input
+                type="text"
+                inputMode={s.type === "int" || s.type === "float" ? "decimal" : undefined}
+                placeholder={String(s.value)}
+                value={text}
+                onChange={(e) => set(key, e.target.value)}
+                aria-label={`${key}, currently ${String(s.value)}`}
+              />
+              <span className="hint">
+                {s.power} · now {String(s.value)}
+              </span>
+            </label>
+          );
+        })}
       </div>
     </Card>
   );
