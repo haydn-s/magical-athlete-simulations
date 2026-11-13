@@ -24,6 +24,10 @@ const roster: RosterInfo = {
     { key: "wild", name: "Wild Wilds", length: 30, spaces: [{ position: 5, trip: true, move: 0, points: 0 }] },
   ],
   track_errors: [],
+  settings: [
+    { power: "SisyphusPower", setting: "STARTING_POINTS", value: 4, type: "int", racers: ["Sisyphus"] },
+    { power: "RubberBandPower", setting: "MIN_GAIN", value: 4, type: "int", racers: ["RubberBand"] },
+  ],
   defaults: { games: 10000, track: "wild", players: 7, places: 2 },
   limits: { max_games: 2_000_000, cpu_count: 8 },
 };
@@ -77,6 +81,43 @@ describe("formFromRun", () => {
     expect(f).toMatchObject({ games: 30000, seed: "7", track: "mild", players: 6, places: 3, focus: ["Scoocher"], fromRun: "run-1" });
     expect(f.pool).not.toContain("Retired"); // no longer in the roster
     expect(toRequest(f, roster)).toMatchObject({ seed: 7, focus: ["Scoocher"], exclude: [], from_run: "run-1" });
+  });
+});
+
+describe("setting overrides", () => {
+  it("sends only settings that differ from the current value", () => {
+    const f = form({ overrides: { "SisyphusPower.STARTING_POINTS": " 2 ", "RubberBandPower.MIN_GAIN": "4" } });
+    expect(toRequest(f, roster).overrides).toEqual([{ power: "SisyphusPower", setting: "STARTING_POINTS", value: 2 }]);
+    expect(toRequest(form({ overrides: { "SisyphusPower.STARTING_POINTS": "" } }), roster).overrides).toBeUndefined();
+  });
+
+  it("copies a run's changed settings", () => {
+    const summary = {
+      manifest: {
+        config: {
+          games: 100, seed: 1, track: "wild", track_name: "Wild Wilds", racers_per_game: 7, places_to_award: 2,
+          focus: [], pool: STANDARD, replaced: [],
+          overrides: [{ power: "SisyphusPower", setting: "STARTING_POINTS", value: 1 }],
+        },
+      },
+    } as unknown as Summary;
+    expect(formFromRun(roster, "r", summary).overrides).toEqual({ "SisyphusPower.STARTING_POINTS": "1" });
+  });
+
+  it("explains bad values", () => {
+    expect(validate(form({ overrides: { "SisyphusPower.STARTING_POINTS": "2.5" } }), roster)).toEqual([
+      "SisyphusPower.STARTING_POINTS must be a whole number.",
+    ]);
+    expect(validate(form({ overrides: { "GonePower.X": "1" } }), roster)[0]).toMatch(/isn’t a setting any more/);
+  });
+
+  it("adds --set to the command like the Python side", () => {
+    // sim.batch.equivalent_command(games=1000, seed=7, focus=["Sisyphus"], overrides=[...], label="low chips")
+    const f = form({ games: 1000, seed: "7", focus: ["Sisyphus"], label: "low chips", pool: STANDARD.filter((n) => n !== "Sisyphus"),
+      overrides: { "SisyphusPower.STARTING_POINTS": "2" } });
+    expect(equivalentCommand(toRequest(f, roster))).toBe(
+      "python -m sim run -n 1000 --seed 7 --focus Sisyphus --set SisyphusPower.STARTING_POINTS=2 --label 'low chips'",
+    );
   });
 });
 

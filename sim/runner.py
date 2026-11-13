@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from Basics import Game, racer_score
 
+from sim import settings
 from sim.stats import Tally
 
 
@@ -24,6 +25,7 @@ class BatchConfig:
     racers_per_game: int = 7
     places_to_award: int = 2
     seed: int = 0
+    overrides: tuple = ()  # (power class, setting, value) applied while games run; see sim/settings.py
 
     def __post_init__(self):
         if self.games < 1:
@@ -99,22 +101,26 @@ def play_chunk(task):
     tally = Tally(config.places_to_award)
     records = []
 
-    for index in range(start, stop):
-        record = play_game(config, index)
-        tally.add(record)
-        if keep_records:
-            records.append(record)
+    with settings.applied(config.overrides):
+        for index in range(start, stop):
+            record = play_game(config, index)
+            tally.add(record)
+            if keep_records:
+                records.append(record)
 
     return stop - start, tally, records
 
 
-def run_batch(config, workers=None, chunk_size=500, keep_records=False, mp_context=None):
+def run_batch(config, workers=None, chunk_size=500, keep_records=False, mp_context=None, isolate=False):
     """
     Yield (games_done, tally, records) per chunk, in game order.
 
     Merge the tallies for the batch totals. `records` holds per-game dicts only
     when keep_records is set. `mp_context` picks the process start method
     (e.g. "spawn"); the platform default is used when it's None.
+
+    Games run in worker processes unless there's one worker, no setting
+    overrides and isolate is False; overrides then never touch this process.
     """
     tasks = [
         (config, start, min(start + chunk_size, config.games), keep_records)
@@ -122,7 +128,7 @@ def run_batch(config, workers=None, chunk_size=500, keep_records=False, mp_conte
     ]
     workers = max(1, min(workers or os.cpu_count() or 1, len(tasks)))
 
-    if workers == 1:
+    if workers == 1 and not config.overrides and not isolate:
         yield from map(play_chunk, tasks)
         return
 

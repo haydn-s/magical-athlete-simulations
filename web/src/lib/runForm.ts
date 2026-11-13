@@ -1,4 +1,4 @@
-import type { JobRequest, RosterInfo, Summary } from "../types";
+import type { JobRequest, Override, RosterInfo, Summary } from "../types";
 
 // The "New run" form, kept as plain data so the rules can be unit tested.
 // The pool picker maps onto the CLI's semantics: unticked standard racers become
@@ -15,7 +15,11 @@ export interface RunForm {
   pool: string[]; // racers that may fill the open seats
   saveGames: boolean;
   fromRun: string | null;
+  /** Changed power settings, "SisyphusPower.STARTING_POINTS" -> typed text; blank keeps the current value. */
+  overrides: Record<string, string>;
 }
+
+export const settingKey = (o: { power: string; setting: string }) => `${o.power}.${o.setting}`;
 
 export const MAX_SEED = Number.MAX_SAFE_INTEGER;
 export const MAX_LABEL = 60;
@@ -33,6 +37,7 @@ export function defaultForm(roster: RosterInfo): RunForm {
     pool: roster.racers.filter((r) => r.default).map((r) => r.name),
     saveGames: false,
     fromRun: null,
+    overrides: {},
   };
 }
 
@@ -50,7 +55,41 @@ export function formFromRun(roster: RosterInfo, runId: string, summary: Summary)
     focus: config.focus.filter((n) => known.has(n)),
     pool: config.pool.filter((n) => known.has(n)),
     fromRun: runId,
+    overrides: Object.fromEntries((config.overrides ?? []).map((o) => [settingKey(o), String(o.value)])),
   };
+}
+
+type SettingInfo = RosterInfo["settings"][number];
+
+/** The typed value typed into a setting's box, or an error message. */
+export function parseSettingValue(text: string, setting: SettingInfo): Override["value"] | { error: string } {
+  const t = text.trim();
+  const name = settingKey(setting);
+  switch (setting.type) {
+    case "bool":
+      if (/^(true|yes|1)$/i.test(t)) return true;
+      if (/^(false|no|0)$/i.test(t)) return false;
+      return { error: `${name} must be true or false.` };
+    case "int":
+      return /^-?\d+$/.test(t) ? Number(t) : { error: `${name} must be a whole number.` };
+    case "float":
+      return t !== "" && Number.isFinite(Number(t)) ? Number(t) : { error: `${name} must be a number.` };
+    default:
+      return t;
+  }
+}
+
+/** Settings whose box holds a value different from the current one. */
+export function changedSettings(form: RunForm, roster: RosterInfo): Override[] {
+  const changed: Override[] = [];
+  for (const setting of roster.settings) {
+    const text = form.overrides[settingKey(setting)];
+    if (text === undefined || text.trim() === "") continue;
+    const value = parseSettingValue(text, setting);
+    if (typeof value === "object" || value === setting.value) continue;
+    changed.push({ power: setting.power, setting: setting.setting, value });
+  }
+  return changed;
 }
 
 /** Base racers that sit out because one of their variants is racing. */
@@ -93,6 +132,8 @@ export function toRequest(form: RunForm, roster: RosterInfo): JobRequest {
   if (form.seed.trim()) request.seed = Number(form.seed.trim());
   if (form.label.trim()) request.label = form.label.trim();
   if (form.fromRun) request.from_run = form.fromRun;
+  const overrides = changedSettings(form, roster);
+  if (overrides.length) request.overrides = overrides;
   return request;
 }
 
@@ -119,6 +160,18 @@ export function validate(form: RunForm, roster: RosterInfo): string[] {
   if (form.focus.length > form.players) {
     errors.push(`${form.focus.length} focus racers don’t fit in a ${form.players}-racer game.`);
   }
+  for (const setting of roster.settings) {
+    const text = form.overrides[settingKey(setting)];
+    if (text === undefined || text.trim() === "") continue;
+    const value = parseSettingValue(text, setting);
+    if (typeof value === "object") errors.push(value.error);
+  }
+  const savedKeys = new Set(roster.settings.map(settingKey));
+  for (const key of Object.keys(form.overrides)) {
+    if (form.overrides[key].trim() && !savedKeys.has(key)) {
+      errors.push(`${key} isn’t a setting any more; clear it to continue.`);
+    }
+  }
   const openSeats = form.players - form.focus.length;
   const available = effectivePool(form, roster).length;
   if (openSeats > available) {
@@ -141,6 +194,7 @@ export function equivalentCommand(request: JobRequest): string {
   ] as const) {
     if (names.length) parts.push(flag, names.join(","));
   }
+  for (const o of request.overrides ?? []) parts.push("--set", `${settingKey(o)}=${String(o.value)}`);
   if (request.label) parts.push("--label", request.label);
   if (request.save_games) parts.push("--save-games");
   return parts.map(shellQuote).join(" ");

@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 //   #/new[?from=<id>]          start a run (optionally from another run's settings)
 //   #/jobs                     runs started from the viewer
 //   #/tracks                   every track, previewed on the board
+//   #/sweep/<id>               a parameter sweep
 
 export type Route =
   | { page: "runs" }
@@ -19,6 +20,7 @@ export type Route =
   | { page: "new"; from: string | null; track: string | null }
   | { page: "jobs" }
   | { page: "tracks" }
+  | { page: "sweep"; sweepId: string }
   | { page: "not-found" };
 
 export function parseRoute(hash: string): Route {
@@ -32,6 +34,7 @@ export function parseRoute(hash: string): Route {
   }
   if (parts[0] === "new" && parts.length === 1) return { page: "new", from: params.get("from"), track: params.get("track") };
   if (parts[0] === "tracks" && parts.length === 1) return { page: "tracks" };
+  if (parts[0] === "sweep" && parts.length === 2) return { page: "sweep", sweepId: parts[1] };
   if (parts[0] === "jobs" && parts.length === 1) return { page: "jobs" };
   if (parts[0] === "run" && parts.length >= 2) {
     const runId = parts[1];
@@ -69,6 +72,7 @@ export const href = {
     return `#/new${query ? `?${query}` : ""}`;
   },
   tracks: () => "#/tracks",
+  sweep: (id: string) => `#/sweep/${encodeURIComponent(id)}`,
   jobs: () => "#/jobs",
 };
 

@@ -184,3 +184,116 @@ export function ColumnChart({
     </div>
   );
 }
+
+export interface PointDatum {
+  key: string;
+  label: string;
+  value: number;
+  lo: number;
+  hi: number;
+  /** Marks the current setting, which every other value is compared with. */
+  highlight?: boolean;
+  tooltip: ReactNode;
+}
+
+/** One value per setting: a dot with its 95% interval, joined in order, with a reference rule. */
+export function PointChart({
+  data,
+  format,
+  reference,
+  height = 230,
+  label,
+}: {
+  data: PointDatum[];
+  format: (v: number) => string;
+  reference?: { value: number; label: string };
+  height?: number;
+  label: string;
+}) {
+  const [ref, width] = useElementWidth<HTMLDivElement>();
+  const [hover, setHover] = useState<number | null>(null);
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+
+  const margin = { top: 18, right: 12, bottom: 30, left: 44 };
+  const ticks = niceTicks(Math.max(...data.map((d) => d.hi), reference?.value ?? 0, 1e-9), 4);
+  const yMax = ticks[ticks.length - 1] || 1;
+  const plotW = Math.max(0, width - margin.left - margin.right);
+  const base = height - margin.bottom;
+  const y = linearScale([0, yMax], [base, margin.top]);
+  const band = data.length ? plotW / data.length : 0;
+  const cx = (i: number) => margin.left + band * (i + 0.5);
+
+  const show = (index: number, at: { x: number; y: number }) => {
+    setHover(index);
+    setTooltip({ ...at, content: data[index].tooltip });
+  };
+  const hide = () => {
+    setHover(null);
+    setTooltip(null);
+  };
+
+  return (
+    <div ref={ref}>
+      {width > 0 && (
+        <svg className="chart" width={width} height={height} role="img" aria-label={label}>
+          {ticks.map((t) => (
+            <g key={t}>
+              <line className={t === 0 ? "baseline" : "grid"} x1={margin.left} x2={width - margin.right} y1={Math.round(y(t)) + 0.5} y2={Math.round(y(t)) + 0.5} />
+              <text x={margin.left - 8} y={y(t) + 4} textAnchor="end">
+                {format(t)}
+              </text>
+            </g>
+          ))}
+          {hover !== null && (
+            <rect className="hover-band" x={margin.left + hover * band} y={margin.top} width={band} height={base - margin.top} />
+          )}
+          {reference && (
+            <g>
+              <line className="reference" x1={margin.left} x2={width - margin.right} y1={Math.round(y(reference.value)) + 0.5} y2={Math.round(y(reference.value)) + 0.5} />
+              <text x={width - margin.right} y={y(reference.value) - 5} textAnchor="end" className="label-secondary">
+                {reference.label}
+              </text>
+            </g>
+          )}
+          <polyline
+            className="series-line"
+            points={data.map((d, i) => `${cx(i)},${y(d.value)}`).join(" ")}
+          />
+          {data.map((d, i) => (
+            <g key={d.key}>
+              <line className="whisker" x1={cx(i)} x2={cx(i)} y1={y(d.lo)} y2={y(d.hi)} />
+              <line className="whisker" x1={cx(i) - 4} x2={cx(i) + 4} y1={y(d.hi)} y2={y(d.hi)} />
+              <line className="whisker" x1={cx(i) - 4} x2={cx(i) + 4} y1={y(d.lo)} y2={y(d.lo)} />
+              <circle className="series-1 ring" cx={cx(i)} cy={y(d.value)} r={d.highlight ? 6 : 4.5} />
+              <text x={cx(i)} y={base + 16} textAnchor="middle" className={d.highlight ? "label-strong" : "label-secondary"}>
+                {d.label}
+              </text>
+              {d.highlight && (
+                <text x={cx(i)} y={base + 28} textAnchor="middle">
+                  current
+                </text>
+              )}
+            </g>
+          ))}
+          {data.map((d, i) => (
+            <rect
+              key={d.key}
+              className="hit"
+              x={margin.left + band * i}
+              y={margin.top}
+              width={band}
+              height={base - margin.top}
+              tabIndex={0}
+              aria-label={`${d.label}: ${format(d.value)}`}
+              onPointerMove={(e) => show(i, { x: e.clientX, y: e.clientY })}
+              onPointerLeave={hide}
+              onFocus={(e) => show(i, anchorOf(e.currentTarget))}
+              onBlur={hide}
+            />
+          ))}
+        </svg>
+      )}
+      <Tooltip state={tooltip} />
+    </div>
+  );
+}

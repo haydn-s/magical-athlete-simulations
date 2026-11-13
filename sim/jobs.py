@@ -15,7 +15,7 @@ import threading
 import time
 from collections import OrderedDict
 
-from sim import batch, tracks
+from sim import batch, settings as power_settings, tracks
 
 MAX_GAMES = 2_000_000
 MAX_NAMES = 200
@@ -66,7 +66,7 @@ def parse_request(data):
     if not isinstance(data, dict):
         raise JobError("Expected a JSON object.")
     known = {"games", "track", "players", "places", "seed", "focus", "include", "exclude", "only",
-             "label", "save_games", "workers", "from_run"}
+             "label", "save_games", "workers", "from_run", "overrides"}
     unknown = sorted(set(data) - known)
     if unknown:
         raise JobError(f"Unknown setting: {', '.join(unknown)}.")
@@ -84,6 +84,18 @@ def parse_request(data):
     if workers is not None:
         workers = _int(data, "workers", None, 1, os.cpu_count() or 1)
 
+    raw_overrides = data.get("overrides", [])
+    if not isinstance(raw_overrides, list) or len(raw_overrides) > 20:
+        raise JobError("overrides must be a list of {power, setting, value}.")
+    overrides = []
+    for item in raw_overrides:
+        if not isinstance(item, dict) or set(item) != {"power", "setting", "value"}:
+            raise JobError("Each override needs exactly power, setting and value.")
+        try:
+            overrides.append(power_settings.check_override(item["power"], item["setting"], item["value"]))
+        except ValueError as exc:
+            raise JobError(str(exc)) from None
+
     settings = {
         "games": _int(data, "games", DEFAULTS["games"], 1, MAX_GAMES),
         "track": track,
@@ -94,6 +106,7 @@ def parse_request(data):
         "include": _names(data, "include"),
         "exclude": _names(data, "exclude"),
         "only": _names(data, "only"),
+        "overrides": overrides,
     }
     try:
         config, replaced = batch.build_config(**settings)
@@ -106,6 +119,7 @@ def parse_request(data):
     settings["save_games"] = save_games
     settings["workers"] = workers
     settings["from_run"] = _optional_str(data, "from_run", 200)
+    settings["overrides"] = [{"power": c, "setting": k, "value": v} for c, k, v in config.overrides]
     return settings, config, replaced
 
 
@@ -117,7 +131,8 @@ class Job:
         self.replaced = replaced
         self.command = batch.equivalent_command(
             **{k: settings[k] for k in ("games", "track", "players", "places", "seed", "focus",
-                                        "include", "exclude", "only", "label", "save_games")}
+                                        "include", "exclude", "only", "label", "save_games")},
+            overrides=config.overrides,
         )
         self.state = "queued"
         self.done = 0
@@ -320,6 +335,7 @@ class JobManager:
                 on_progress=progress,
                 should_stop=job.cancel_requested.is_set,
                 mp_context=self.mp_context,
+                isolate=True,  # never run games in the server process (see sim/settings.py)
             )
         except batch.Cancelled:
             job.state = "cancelled"

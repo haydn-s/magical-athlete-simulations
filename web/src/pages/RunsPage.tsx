@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useRuns } from "../lib/api";
+import { fetchSweeps, useLoad, useRuns } from "../lib/api";
 import { href } from "../lib/router";
 import { compact, formatDate, int, runTitle } from "../lib/stats";
-import type { RunListItem } from "../types";
+import type { RunListItem, SweepListItem } from "../types";
+import { sweepTitle } from "./SweepPage";
 import { Badge, Card, LoadError, Loading, SortHeader, sortRows, useSort } from "../components/ui";
 
 type SortKey = "created" | "title" | "track" | "games" | "players";
@@ -17,7 +18,9 @@ const SORT_VALUE: Record<SortKey, (r: RunListItem) => number | string> = {
 
 export function RunsPage() {
   const runs = useRuns();
+  const sweeps = useLoad(fetchSweeps, []);
   const [selected, setSelected] = useState<string[]>([]);
+  const [showSweepRuns, setShowSweepRuns] = useState(false);
   const [sort, onSort] = useSort<SortKey>("created");
 
   if (runs.status === "error") return <LoadError message={runs.error} />;
@@ -40,7 +43,9 @@ export function RunsPage() {
   // Comparing in selection order: the first run picked is the baseline.
   const toggle = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id].slice(-2)));
-  const rows = sortRows(runs.data, SORT_VALUE[sort.key], sort.dir);
+  const sweepRuns = runs.data.filter((r) => r.manifest.sweep).length;
+  const visible = showSweepRuns ? runs.data : runs.data.filter((r) => !r.manifest.sweep);
+  const rows = sortRows(visible, SORT_VALUE[sort.key], sort.dir);
 
   return (
     <>
@@ -51,6 +56,8 @@ export function RunsPage() {
           them.
         </p>
       </div>
+
+      {sweeps.status === "ready" && sweeps.data.length > 0 && <SweepList sweeps={sweeps.data} />}
 
       <div className="toolbar">
         <a className="button primary" href={href.newRun()}>
@@ -64,6 +71,12 @@ export function RunsPage() {
         >
           Compare selected ({selected.length}/2)
         </button>
+        {sweepRuns > 0 && (
+          <label className="check">
+            <input type="checkbox" checked={showSweepRuns} onChange={(e) => setShowSweepRuns(e.target.checked)} />
+            Show runs from sweeps ({sweepRuns})
+          </label>
+        )}
         {selected.length > 0 && (
           <button type="button" className="button" onClick={() => setSelected([])}>
             Clear
@@ -114,6 +127,7 @@ export function RunsPage() {
                     <td className="num">{config.racers_per_game}</td>
                     <td>
                       {config.focus.length ? config.focus.join(", ") : <span className="muted">—</span>}
+                      {run.manifest.sweep && <> <Badge>sweep</Badge></>}
                       {run.totals.errors > 0 && <> <Badge>{int(run.totals.errors)} errors</Badge></>}
                     </td>
                     <td className="num mono">{config.seed}</td>
@@ -126,5 +140,44 @@ export function RunsPage() {
         </div>
       </Card>
     </>
+  );
+}
+
+function SweepList({ sweeps }: { sweeps: SweepListItem[] }) {
+  return (
+    <Card
+      flush
+      title="Sweeps"
+      note="Each sweep ran the same games at several values of a power setting. Make one with python -m sim sweep."
+    >
+      <div className="table-scroll">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Sweep</th>
+              <th>Values</th>
+              <th>Created</th>
+              <th className="num">Games per value</th>
+              <th>Racers</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sweeps.map((sweep) => (
+              <tr key={sweep.id}>
+                <td>
+                  <a href={href.sweep(sweep.id)}>{sweepTitle(sweep)}</a>{" "}
+                  {!sweep.complete && <Badge>incomplete</Badge>}
+                  {sweep.no_effect && <Badge>no effect</Badge>}
+                </td>
+                <td>{sweep.settings.map((s) => `${s.setting} = ${s.values.join(", ")}`).join("; ")}</td>
+                <td>{formatDate(sweep.created)}</td>
+                <td className="num">{compact(sweep.config.games)}</td>
+                <td>{sweep.subjects.join(", ")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }

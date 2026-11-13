@@ -8,6 +8,7 @@ import { RacerPage } from "./pages/RacerPage";
 import { ReplayPage } from "./pages/ReplayPage";
 import { RunPage } from "./pages/RunPage";
 import { RunsPage } from "./pages/RunsPage";
+import { SweepPage } from "./pages/SweepPage";
 import { TracksPage } from "./pages/TracksPage";
 
 export function App() {
@@ -26,7 +27,7 @@ export function App() {
             <span className="brand-text">Magical Athlete Results</span>
           </a>
           <nav className="nav" aria-label="Main">
-            <a href={href.runs()} aria-current={["runs", "run", "racer", "game"].includes(route.page) ? "page" : undefined}>
+            <a href={href.runs()} aria-current={["runs", "run", "racer", "game", "sweep"].includes(route.page) ? "page" : undefined}>
               Runs
             </a>
             <a href={href.compare()} aria-current={route.page === "compare" ? "page" : undefined}>
@@ -64,6 +65,8 @@ function Page({ route }: { route: Route }) {
       return <ComparePage a={route.a} b={route.b} />;
     case "new":
       return <NewRunPage from={route.from} track={route.track} />;
+    case "sweep":
+      return <SweepPage key={route.sweepId} sweepId={route.sweepId} />;
     case "tracks":
       return <TracksPage />;
     case "jobs":
